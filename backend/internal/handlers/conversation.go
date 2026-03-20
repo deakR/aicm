@@ -19,9 +19,7 @@ type ConversationHandler struct {
 	DB *database.Service
 }
 
-// ListConversations fetches all open/pending conversations for the inbox sidebar
 func (h *ConversationHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
-	// Query joins the users table to get the customer name, and grabs the most recent message for the preview
 	query := `
 		SELECT 
 			c.id, c.customer_id, c.status, c.created_at, c.updated_at,
@@ -50,7 +48,6 @@ func (h *ConversationHandler) ListConversations(w http.ResponseWriter, r *http.R
 		conversations = append(conversations, c)
 	}
 
-	// Ensure we return an empty array instead of null if there are no conversations
 	if conversations == nil {
 		conversations = []models.Conversation{}
 	}
@@ -59,7 +56,6 @@ func (h *ConversationHandler) ListConversations(w http.ResponseWriter, r *http.R
 	json.NewEncoder(w).Encode(conversations)
 }
 
-// GetMessages fetches all messages for a specific conversation ID
 func (h *ConversationHandler) GetMessages(w http.ResponseWriter, r *http.Request) {
 	conversationID := chi.URLParam(r, "id")
 
@@ -99,16 +95,13 @@ func (h *ConversationHandler) GetMessages(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(messages)
 }
 
-// MessagePayload is the expected JSON body for a new message
 type MessagePayload struct {
 	Content string `json:"content"`
 }
 
-// SendMessage adds a new message to a conversation
 func (h *ConversationHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	conversationID := chi.URLParam(r, "id")
 
-	// 1. Get the sender's ID from the JWT context
 	claims, ok := r.Context().Value(middleware.UserContextKey).(jwt.MapClaims)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -119,19 +112,18 @@ func (h *ConversationHandler) SendMessage(w http.ResponseWriter, r *http.Request
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+	// Keep a UI-friendly label so clients can render message alignment immediately.
 	senderName := "Agent"
 	if role, ok := claims["role"].(string); ok && role == "customer" {
 		senderName = "Customer"
 	}
 
-	// 2. Decode the request body
 	var payload MessagePayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || strings.TrimSpace(payload.Content) == "" {
 		http.Error(w, "Invalid message content", http.StatusBadRequest)
 		return
 	}
 
-	// 3. Insert into PostgreSQL
 	query := `
 		INSERT INTO messages (conversation_id, sender_id, content, is_ai_generated)
 		VALUES ($1, $2, $3, false)
@@ -151,11 +143,10 @@ func (h *ConversationHandler) SendMessage(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 4. Update the conversation's updated_at timestamp so it jumps to the top of the inbox
 	updateQuery := `UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = $1`
 	_, _ = h.DB.Pool.Exec(context.Background(), updateQuery, conversationID)
 
-	// Broadcast to any clients currently viewing this conversation.
+	// Push the new message to all websocket subscribers of this conversation.
 	ws.Broadcast(conversationID, newMessage)
 
 	w.WriteHeader(http.StatusCreated)

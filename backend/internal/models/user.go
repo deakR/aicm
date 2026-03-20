@@ -2,7 +2,6 @@ package models
 
 import "time"
 
-// User represents a user in the database
 type User struct {
 	ID           string    `json:"id"`
 	Role         string    `json:"role"`

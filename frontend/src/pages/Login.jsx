@@ -29,9 +29,7 @@ export default function Login() {
       }
 
       if (response.ok) {
-        // Save the JWT to local storage
         localStorage.setItem('token', data?.token || '');
-        // Redirect to the upcoming shared inbox
         navigate('/inbox');
       } else {
         setError(data?.message || raw || 'Invalid credentials');

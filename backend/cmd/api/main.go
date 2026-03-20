@@ -13,19 +13,22 @@ import (
 )
 
 func main() {
-	// 1. Load Environment
-	if err := godotenv.Load(); err != nil {
+	loaded := false
+	for _, path := range []string{"../.env", ".env"} {
+		if err := godotenv.Load(path); err == nil {
+			loaded = true
+			break
+		}
+	}
+	if !loaded {
 		log.Println("Warning: No .env file found")
 	}
 
-	// 2. Initialize Database
 	db := database.New()
-	defer db.Close() // Ensures the pool closes when main exits
+	defer db.Close()
 
-	// 3. Initialize Server
 	srv := server.New(db)
 
-	// 4. Start Server
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"

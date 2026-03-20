@@ -1,15 +1,14 @@
 services:
   db:
-    # This image includes PostgreSQL and the pgvector extension we need for Gemini
+    # This image includes PostgreSQL and the pgvector extension needed for Gemini
     image: pgvector/pgvector:pg18
     container_name: aicm_db
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: random123
-      POSTGRES_DB: aicmpost_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      # Maps your machine's port 6500 to the container's internal port 5432
-      - "6500:5432"
+      - "${POSTGRES_PORT}:5432"
     volumes:
       - pgdata:/var/lib/postgresql
     restart: unless-stopped

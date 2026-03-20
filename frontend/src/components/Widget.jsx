@@ -31,6 +31,7 @@ export default function Widget() {
       socket.onmessage = (event) => {
         const newMsg = JSON.parse(event.data);
         setMessages((prev) => {
+          // Ignore duplicates when we already appended the optimistic send result.
           if (prev.find((m) => m.id === newMsg.id)) return prev;
           return [...prev, newMsg];
         });
@@ -41,6 +42,7 @@ export default function Widget() {
           setWsState('disconnected');
           return;
         }
+        // Short fixed-delay reconnect is enough for prototype reliability.
         setWsState('reconnecting');
         reconnectTimer = setTimeout(connect, 1500);
       };

@@ -16,7 +16,6 @@ export default function Inbox() {
     navigate('/login');
   };
 
-  // 1. Fetch Conversations on Mount
   useEffect(() => {
     const fetchConversations = async () => {
       try {
@@ -26,9 +25,9 @@ export default function Inbox() {
         if (res.ok) {
           const data = await res.json();
           setConversations(data);
-          if (data.length > 0) setActiveChat(data[0]); // Auto-select the first chat
+			if (data.length > 0) setActiveChat(data[0]);
         } else if (res.status === 401) {
-          handleLogout(); // Token expired or invalid
+			handleLogout();
         }
       } catch (err) {
         console.error("Failed to fetch conversations", err);
@@ -38,7 +37,6 @@ export default function Inbox() {
     fetchConversations();
   }, [token]);
 
-  // 2. Fetch Messages and connect WS when the Active Chat changes
   useEffect(() => {
     if (!activeChat) {
       setWsState('disconnected');
@@ -60,6 +58,7 @@ export default function Inbox() {
       socket.onmessage = (event) => {
         const newMsg = JSON.parse(event.data);
         setMessages((prev) => {
+          // Prevent duplicate inserts when message already exists in local state.
           if (prev.find((m) => m.id === newMsg.id)) return prev;
           return [...prev, newMsg];
         });
@@ -70,6 +69,7 @@ export default function Inbox() {
           setWsState('disconnected');
           return;
         }
+        // Keep trying while this chat remains active.
         setWsState('reconnecting');
         reconnectTimer = setTimeout(connect, 1500);
       };
@@ -130,8 +130,7 @@ export default function Inbox() {
 
   return (
     <div className="flex h-screen overflow-hidden font-sans bg-gray-50">
-      
-      {/* LEFT PANE: Sidebar & Conversation List */}
+		
       <div className="flex flex-col w-80 bg-white border-r border-gray-200">
         <div className="flex items-center justify-between p-4 bg-gray-50 border-b border-gray-200">
           <h2 className="text-lg font-bold text-gray-800">Shared Inbox</h2>
@@ -161,7 +160,6 @@ export default function Inbox() {
         </div>
       </div>
 
-      {/* MIDDLE PANE: Active Chat Area */}
       <div className="flex flex-col flex-1 bg-white">
         {activeChat ? (
           <>
@@ -177,7 +175,6 @@ export default function Inbox() {
 
             <div className="flex-1 p-6 space-y-4 overflow-y-auto bg-gray-50">
               {messages.map((msg) => {
-                // Check if the sender is the customer attached to the conversation
                 const isCustomer = msg.sender_id === activeChat.customer_id;
                 
                 return (
@@ -222,7 +219,6 @@ export default function Inbox() {
         )}
       </div>
 
-      {/* RIGHT PANE: Details & AI Copilot Panel */}
       {activeChat && (
         <div className="flex flex-col border-l border-gray-200 w-72 bg-gray-50">
           <div className="p-5 border-b border-gray-200">
