@@ -292,9 +292,32 @@ jobs:
             APP_PATH="${{ secrets.AZURE_VM_APP_PATH }}"
             REPO_URL="https://github.com/${{ github.repository }}.git"
 
-            if [ ! -d "$APP_PATH/.git" ]; then
-              mkdir -p "$APP_PATH"
+            if [ -z "${APP_PATH:-}" ]; then
+              APP_PATH="$HOME/aicm"
+              echo "AZURE_VM_APP_PATH was empty; defaulting to $APP_PATH"
+            fi
 
+            case "$APP_PATH" in
+              ~/*)
+                APP_PATH="$HOME/${APP_PATH#~/}"
+                ;;
+            esac
+
+            if ! mkdir -p "$APP_PATH"; then
+              echo "Cannot create APP_PATH: $APP_PATH"
+              echo "Ensure AZURE_VM_APP_PATH points to a writable directory for user $(whoami)."
+              exit 1
+            fi
+
+            if ! touch "$APP_PATH/.deploy-write-test" 2>/dev/null; then
+              echo "APP_PATH is not writable by user $(whoami): $APP_PATH"
+              ls -ld "$APP_PATH" || true
+              ls -ld "$(dirname "$APP_PATH")" || true
+              exit 1
+            fi
+            rm -f "$APP_PATH/.deploy-write-test"
+
+            if [ ! -d "$APP_PATH/.git" ]; then
               if [ -z "$(find "$APP_PATH" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
                 echo "First deploy bootstrap: cloning repo to $APP_PATH"
                 git clone --depth 1 --branch main "$REPO_URL" "$APP_PATH"
