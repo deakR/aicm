@@ -294,8 +294,9 @@ jobs:
           envs: AZURE_VM_APP_PATH,DOCKER_USERNAME,DOCKERHUB_TOKEN,GITHUB_TOKEN,RUN_DEMO_SEED
           script_stop: true
           script: |
-            set -eu
+            set -eux
             echo "Connected to $(hostname) as $(whoami)"
+            USER_HOME="${HOME:-/home/$(whoami)}"
             APP_PATH="${AZURE_VM_APP_PATH:-}"
             REPO_TOKEN="${GITHUB_TOKEN:-}"
             REPO_URL="https://github.com/${{ github.repository }}.git"
@@ -313,7 +314,7 @@ jobs:
 
             if [ -z "${APP_PATH:-}" ]
             then
-              APP_PATH="$HOME/aicm"
+              APP_PATH="$USER_HOME/aicm"
               echo "AZURE_VM_APP_PATH was empty; defaulting to $APP_PATH"
             fi
 
@@ -321,7 +322,7 @@ jobs:
             APP_PATH="$(printf '%s' "$APP_PATH" | tr -d '\r')"
             if [ "${APP_PATH#~/}" != "$APP_PATH" ]
             then
-              APP_PATH="$HOME/${APP_PATH#~/}"
+              APP_PATH="$USER_HOME/${APP_PATH#~/}"
             fi
 
             if ! mkdir -p "$APP_PATH"
@@ -346,7 +347,7 @@ jobs:
             fi
             rm -f "$APP_PATH/.deploy-write-test"
 
-            first_entry="$(find "$APP_PATH" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null || true)"
+            first_entry="$(ls -A "$APP_PATH" 2>/dev/null | head -n 1 || true)"
 
             if [ ! -d "$APP_PATH/.git" ]
             then
