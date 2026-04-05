@@ -280,16 +280,21 @@ jobs:
       - name: Deploy to Azure VM over SSH
         if: steps.gate.outputs.enabled == 'true'
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          AZURE_VM_APP_PATH: ${{ secrets.AZURE_VM_APP_PATH }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          RUN_DEMO_SEED: ${{ secrets.RUN_DEMO_SEED }}
         with:
           host: ${{ secrets.AZURE_VM_HOST }}
           username: ${{ secrets.AZURE_VM_USER }}
           key: ${{ secrets.AZURE_VM_SSH_KEY }}
           debug: true
+          envs: AZURE_VM_APP_PATH,DOCKER_USERNAME,RUN_DEMO_SEED
           script_stop: true
           script: |
             set -eu
             echo "Connected to $(hostname) as $(whoami)"
-            APP_PATH="${{ secrets.AZURE_VM_APP_PATH }}"
+            APP_PATH="${AZURE_VM_APP_PATH:-}"
             REPO_URL="https://github.com/${{ github.repository }}.git"
 
             if [ -z "${APP_PATH:-}" ]
@@ -355,4 +360,4 @@ jobs:
 
             cd "$APP_PATH"
             chmod +x deploy.sh
-            DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}" RUN_DEMO_SEED="${{ secrets.RUN_DEMO_SEED }}" ./deploy.sh
+            DOCKER_USERNAME="${DOCKER_USERNAME:-}" RUN_DEMO_SEED="${RUN_DEMO_SEED:-}" ./deploy.sh
