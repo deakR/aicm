@@ -283,19 +283,33 @@ jobs:
         env:
           AZURE_VM_APP_PATH: ${{ secrets.AZURE_VM_APP_PATH }}
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           RUN_DEMO_SEED: ${{ secrets.RUN_DEMO_SEED }}
         with:
           host: ${{ secrets.AZURE_VM_HOST }}
           username: ${{ secrets.AZURE_VM_USER }}
           key: ${{ secrets.AZURE_VM_SSH_KEY }}
           debug: true
-          envs: AZURE_VM_APP_PATH,DOCKER_USERNAME,RUN_DEMO_SEED
+          envs: AZURE_VM_APP_PATH,DOCKER_USERNAME,DOCKERHUB_TOKEN,GITHUB_TOKEN,RUN_DEMO_SEED
           script_stop: true
           script: |
             set -eu
             echo "Connected to $(hostname) as $(whoami)"
             APP_PATH="${AZURE_VM_APP_PATH:-}"
+            REPO_TOKEN="${GITHUB_TOKEN:-}"
             REPO_URL="https://github.com/${{ github.repository }}.git"
+
+            if ! command -v git >/dev/null 2>&1
+            then
+              echo "git is not installed on the VM for user $(whoami)."
+              exit 1
+            fi
+
+            if [ -n "${REPO_TOKEN:-}" ]
+            then
+              REPO_URL="https://x-access-token:${REPO_TOKEN}@github.com/${{ github.repository }}.git"
+            fi
 
             if [ -z "${APP_PATH:-}" ]
             then
@@ -360,4 +374,4 @@ jobs:
 
             cd "$APP_PATH"
             chmod +x deploy.sh
-            DOCKER_USERNAME="${DOCKER_USERNAME:-}" RUN_DEMO_SEED="${RUN_DEMO_SEED:-}" ./deploy.sh
+            DOCKER_USERNAME="${DOCKER_USERNAME:-}" DOCKERHUB_TOKEN="${DOCKERHUB_TOKEN:-}" RUN_DEMO_SEED="${RUN_DEMO_SEED:-}" ./deploy.sh

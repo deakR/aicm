@@ -29,6 +29,13 @@ if [ ! -f .env ]; then
 fi
 
 RUN_DEMO_SEED="${RUN_DEMO_SEED:-false}"
+DOCKER_USERNAME="${DOCKER_USERNAME:-}"
+DOCKERHUB_TOKEN="${DOCKERHUB_TOKEN:-}"
+
+if [ -n "$DOCKER_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+  echo "Authenticating with Docker Hub..."
+  printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKER_USERNAME" --password-stdin
+fi
 
 echo "Pulling latest Docker images and starting containers..."
 "${COMPOSE_CMD[@]}" -f docker-compose.prod.yml pull
