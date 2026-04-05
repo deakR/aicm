@@ -297,11 +297,11 @@ jobs:
               echo "AZURE_VM_APP_PATH was empty; defaulting to $APP_PATH"
             fi
 
-            case "$APP_PATH" in
-              ~/*)
-                APP_PATH="$HOME/${APP_PATH#~/}"
-                ;;
-            esac
+            # Trim accidental CR from secret input and expand leading ~/ safely.
+            APP_PATH="${APP_PATH%$'\r'}"
+            if [[ "$APP_PATH" == ~/* ]]; then
+              APP_PATH="$HOME/${APP_PATH#~/}"
+            fi
 
             if ! mkdir -p "$APP_PATH"; then
               echo "Cannot create APP_PATH: $APP_PATH"
