@@ -70,7 +70,7 @@ describe("useInboxConversationsLoader", () => {
     renderHook(() => useInboxConversationsLoader(args));
 
     await waitFor(() => {
-      expect(args.navigate).toHaveBeenCalledWith("/login");
+      expect(args.navigate).toHaveBeenCalledWith("/workspace/login");
     });
 
     expect(removeItemSpy).toHaveBeenCalledWith("token");

@@ -1,7 +1,11 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import InboxFiltersPanel from './InboxFiltersPanel';
+
+afterEach(() => {
+  cleanup();
+});
 
 describe('InboxFiltersPanel', () => {
   const emptyFilters = {
@@ -72,7 +76,8 @@ describe('InboxFiltersPanel', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'billing' }));
+    const billingButtons = screen.getAllByRole('button', { name: 'billing' });
+    fireEvent.click(billingButtons[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
     fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
 
