@@ -633,9 +633,13 @@ body {
   background: color-mix(in srgb, var(--app-card-muted) 92%, transparent);
   color: var(--app-text-muted);
   border-radius: 9999px;
+  max-width: 100%;
   padding: 0.55rem 1rem;
   font-size: 0.82rem;
   font-weight: 800;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
   transition:
     transform 160ms ease,
     border-color 160ms ease,
@@ -1058,6 +1062,7 @@ body {
 
 .help-article-card {
   width: 100%;
+  min-width: 0;
   border: 1px solid var(--app-border);
   background: color-mix(in srgb, var(--app-card) 97%, transparent);
   color: var(--app-text);
@@ -1091,6 +1096,7 @@ body {
   font-size: 1.08rem;
   font-weight: 800;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .help-article-views {
@@ -1098,6 +1104,7 @@ body {
   color: var(--app-text-soft);
   font-size: 0.72rem;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .help-article-summary {
@@ -1105,6 +1112,8 @@ body {
   color: var(--app-text-muted);
   font-size: 0.92rem;
   line-height: 1.7;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   line-clamp: 3;

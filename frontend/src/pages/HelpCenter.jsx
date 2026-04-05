@@ -115,8 +115,8 @@ export default function HelpCenter() {
   return (
     <div className="app-shell min-h-screen font-sans">
       <div className="px-6 py-6 md:px-8 lg:px-10">
-        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 py-2">
-          <div>
+        <div className="mx-auto flex w-full max-w-7xl flex-col items-start gap-4 py-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <p
               className="text-xs font-semibold uppercase tracking-[0.3em]"
               style={{ color: isDark ? palette.accentSoft : palette.accentDark }}
@@ -127,7 +127,7 @@ export default function HelpCenter() {
               Public help articles, clear answers, and secure customer support.
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-start">
             <Link to="/" className="app-secondary-button">
               Home
             </Link>
@@ -311,10 +311,10 @@ export default function HelpCenter() {
             {Object.entries(groupedArticles).map(([collectionName, sections]) => (
               <section key={collectionName} className="space-y-5">
                 <div
-                  className="flex items-end justify-between gap-4 border-b pb-4"
+                  className="flex flex-col gap-3 border-b pb-4 sm:flex-row sm:items-end sm:justify-between"
                   style={{ borderColor: "var(--app-border)" }}
                 >
-                  <div>
+                  <div className="min-w-0">
                     <p
                       className="text-xs font-semibold uppercase tracking-[0.24em]"
                       style={{ color: palette.accentDark }}
@@ -322,7 +322,7 @@ export default function HelpCenter() {
                       Collection
                     </p>
                     <h3
-                      className="mt-2 text-2xl font-bold"
+                      className="mt-2 break-words text-2xl font-bold"
                       style={{ color: "var(--app-text)" }}
                     >
                       {collectionName}
@@ -337,9 +337,9 @@ export default function HelpCenter() {
                 <div className="space-y-8">
                   {Object.entries(sections).map(([sectionName, sectionArticles]) => (
                     <div key={`${collectionName}-${sectionName}`} className="space-y-4">
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-wrap items-center gap-3">
                         <span
-                          className="rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]"
+                          className="max-w-full break-words rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]"
                           style={{
                             backgroundColor:
                               "color-mix(in srgb, var(--brand-accent-soft) 70%, var(--app-card))",
