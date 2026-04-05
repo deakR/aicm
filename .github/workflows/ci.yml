@@ -244,6 +244,39 @@ jobs:
             echo "AUTO_DEPLOY_ENABLED is enabled."
           fi
 
+      - name: Preflight deploy secrets and SSH reachability
+        if: steps.gate.outputs.enabled == 'true'
+        shell: bash
+        env:
+          AZURE_VM_HOST: ${{ secrets.AZURE_VM_HOST }}
+          AZURE_VM_SSH_KEY: ${{ secrets.AZURE_VM_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${AZURE_VM_HOST:-}" ]; then
+            echo "AZURE_VM_HOST secret is empty."
+            exit 1
+          fi
+
+          if [ -z "${AZURE_VM_SSH_KEY:-}" ]; then
+            echo "AZURE_VM_SSH_KEY secret is empty."
+            exit 1
+          fi
+
+          if ! grep -q "BEGIN .*PRIVATE KEY" <<<"$AZURE_VM_SSH_KEY"; then
+            echo "AZURE_VM_SSH_KEY does not look like a private key."
+            exit 1
+          fi
+
+          echo "Checking SSH reachability on port 22..."
+          if timeout 15 bash -c "cat < /dev/null > /dev/tcp/${AZURE_VM_HOST}/22"; then
+            echo "SSH port is reachable from GitHub runner."
+          else
+            echo "Cannot reach host on port 22 from GitHub runner."
+            echo "Check VM power state, NSG/firewall inbound rule for TCP/22, and AZURE_VM_HOST value."
+            exit 1
+          fi
+
       - name: Deploy to Azure VM over SSH
         if: steps.gate.outputs.enabled == 'true'
         uses: appleboy/ssh-action@v1.2.0
@@ -251,9 +284,11 @@ jobs:
           host: ${{ secrets.AZURE_VM_HOST }}
           username: ${{ secrets.AZURE_VM_USER }}
           key: ${{ secrets.AZURE_VM_SSH_KEY }}
+          debug: true
           script_stop: true
           script: |
-            set -e
+            set -euo pipefail
+            echo "Connected to $(hostname) as $(whoami)"
             APP_PATH="${{ secrets.AZURE_VM_APP_PATH }}"
             REPO_URL="https://github.com/${{ github.repository }}.git"
 
