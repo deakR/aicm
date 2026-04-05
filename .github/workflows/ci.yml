@@ -258,9 +258,19 @@ jobs:
             REPO_URL="https://github.com/${{ github.repository }}.git"
 
             if [ ! -d "$APP_PATH/.git" ]; then
-              echo "First deploy bootstrap: cloning repo to $APP_PATH"
               mkdir -p "$APP_PATH"
-              git clone --depth 1 --branch main "$REPO_URL" "$APP_PATH"
+
+              if [ -z "$(find "$APP_PATH" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+                echo "First deploy bootstrap: cloning repo to $APP_PATH"
+                git clone --depth 1 --branch main "$REPO_URL" "$APP_PATH"
+              else
+                echo "Bootstrap path exists and is non-empty without .git; initializing repository in place"
+                git -C "$APP_PATH" init
+                git -C "$APP_PATH" remote remove origin || true
+                git -C "$APP_PATH" remote add origin "$REPO_URL"
+                git -C "$APP_PATH" fetch --depth 1 origin main
+                git -C "$APP_PATH" checkout -B main origin/main
+              fi
             else
               echo "Updating existing repo checkout at $APP_PATH"
               git -C "$APP_PATH" fetch origin main
