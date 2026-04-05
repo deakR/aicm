@@ -11,7 +11,7 @@ for (const viewport of VIEWPORTS) {
   test(`landing is responsive at ${viewport.name}`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await page.goto('/');
-    await expect(page.getByRole('link', { name: /explore help center/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: /browse help center/i })).toBeVisible();
 
     const hasHorizontalOverflow = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth + 1,
@@ -22,7 +22,9 @@ for (const viewport of VIEWPORTS) {
   test(`help center is responsive at ${viewport.name}`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await page.goto('/help');
-    await expect(page.getByRole('heading', { name: /how can we help/i })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: /find answers without digging through clutter/i }),
+    ).toBeVisible();
 
     const hasHorizontalOverflow = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth + 1,
