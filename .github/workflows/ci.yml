@@ -292,9 +292,8 @@ jobs:
           key: ${{ secrets.AZURE_VM_SSH_KEY }}
           debug: true
           envs: AZURE_VM_APP_PATH,DOCKER_USERNAME,DOCKERHUB_TOKEN,GITHUB_TOKEN,RUN_DEMO_SEED
-          script_stop: true
           script: |
-            set -eux
+            set -eu
             echo "Connected to $(hostname) as $(whoami)"
             USER_HOME="${HOME:-/home/$(whoami)}"
             APP_PATH="${AZURE_VM_APP_PATH:-}"
@@ -303,8 +302,14 @@ jobs:
 
             if ! command -v git >/dev/null 2>&1
             then
-              echo "git is not installed on the VM for user $(whoami)."
-              exit 1
+              echo "git is not installed. Attempting to auto-install..."
+              if command -v apt-get >/dev/null 2>&1
+              then
+                sudo apt-get update && sudo apt-get install -y git
+              else
+                echo "Could not auto-install git. Please install git manually."
+                exit 1
+              fi
             fi
 
             if [ -n "${REPO_TOKEN:-}" ]
