@@ -263,7 +263,7 @@ jobs:
             exit 1
           fi
 
-          if ! grep -q "BEGIN .*PRIVATE KEY" <<<"$AZURE_VM_SSH_KEY"; then
+          if ! echo "$AZURE_VM_SSH_KEY" | grep -q "BEGIN .*PRIVATE KEY"; then
             echo "AZURE_VM_SSH_KEY does not look like a private key."
             exit 1
           fi
@@ -287,7 +287,7 @@ jobs:
           debug: true
           script_stop: true
           script: |
-            set -euo pipefail
+            set -eu
             echo "Connected to $(hostname) as $(whoami)"
             APP_PATH="${{ secrets.AZURE_VM_APP_PATH }}"
             REPO_URL="https://github.com/${{ github.repository }}.git"
@@ -298,10 +298,12 @@ jobs:
             fi
 
             # Trim accidental CR from secret input and expand leading ~/ safely.
-            APP_PATH="${APP_PATH%$'\r'}"
-            if [[ "$APP_PATH" == ~/* ]]; then
-              APP_PATH="$HOME/${APP_PATH#~/}"
-            fi
+            APP_PATH="$(printf '%s' "$APP_PATH" | tr -d '\r')"
+            case "$APP_PATH" in
+              ~/*)
+                APP_PATH="$HOME/${APP_PATH#~/}"
+                ;;
+            esac
 
             if ! mkdir -p "$APP_PATH"; then
               echo "Cannot create APP_PATH: $APP_PATH"
