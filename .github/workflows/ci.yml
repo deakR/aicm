@@ -374,8 +374,10 @@ jobs:
             else
               echo "Updating existing repo checkout at $APP_PATH"
               git -C "$APP_PATH" fetch origin main
+              git -C "$APP_PATH" reset --hard HEAD
+              git -C "$APP_PATH" clean -fd
               git -C "$APP_PATH" checkout main
-              git -C "$APP_PATH" pull --ff-only origin main
+              git -C "$APP_PATH" reset --hard origin/main
             fi
 
             cd "$APP_PATH"
