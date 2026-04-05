@@ -1,245 +1,335 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import ResizablePanels from "../components/ResizablePanels";
+import ActiveConversationHeader from "./inbox/ActiveConversationHeader";
+import EmailSimulationModal from "./inbox/EmailSimulationModal";
+import InboxConversationRail from "./inbox/InboxConversationRail";
+import InboxDetailsRail from "./inbox/InboxDetailsRail";
+import MessageComposer from "./inbox/MessageComposer";
+import MergeConversationModal from "./inbox/MergeConversationModal";
+import MessageBubble from "./inbox/MessageBubble";
+import useConversationThread from "./inbox/useConversationThread";
+import useInboxCopilot from "./inbox/useInboxCopilot";
+import useInboxConversationActions from "./inbox/useInboxConversationActions";
+import useInboxConversationsLoader from "./inbox/useInboxConversationsLoader";
+import useInboxConversationStream from "./inbox/useInboxConversationStream";
+import useInboxDerivedData from "./inbox/useInboxDerivedData";
+import useInboxMessageComposer from "./inbox/useInboxMessageComposer";
+import useInboxPeople from "./inbox/useInboxPeople";
+import useInboxSupportActions from "./inbox/useInboxSupportActions";
+import { defaultEmailDraft } from "./inbox/inboxHelpers";
+import useInboxViewState from "./inbox/useInboxViewState";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8900";
 
 export default function Inbox() {
   const [conversations, setConversations] = useState([]);
-  const [messages, setMessages] = useState([]);
   const [activeChat, setActiveChat] = useState(null);
-  const [messagePrompt, setMessagePrompt] = useState('');
-  const [wsState, setWsState] = useState('disconnected');
-  
+  const [messagePrompt, setMessagePrompt] = useState("");
+  const [isInternal, setIsInternal] = useState(false);
+  const [accessError, setAccessError] = useState("");
+  const [isCreatingTicket, setIsCreatingTicket] = useState(false);
+  const [attachment, setAttachment] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [isSubmittingEmail, setIsSubmittingEmail] = useState(false);
+  const [emailDraft, setEmailDraft] = useState(() => ({
+    ...defaultEmailDraft,
+  }));
+  const fileInputRef = useRef(null);
+
   const navigate = useNavigate();
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem("token");
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    navigate('/login');
-  };
+  const { agents, customers } = useInboxPeople({
+    apiUrl: API_URL,
+    token,
+  });
 
-  useEffect(() => {
-    const fetchConversations = async () => {
-      try {
-        const res = await fetch('http://localhost:8900/api/protected/conversations', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setConversations(data);
-			if (data.length > 0) setActiveChat(data[0]);
-        } else if (res.status === 401) {
-			handleLogout();
-        }
-      } catch (err) {
-        console.error("Failed to fetch conversations", err);
-      }
-    };
+  const {
+    filters,
+    setFilters,
+    showFilters,
+    setShowFilters,
+    showConversationRail,
+    setShowConversationRail,
+    showDetailsRail,
+    setShowDetailsRail,
+    availableTags,
+    activeFilterCount,
+    filterSummary,
+    panelLayout,
+    clearFilters,
+  } = useInboxViewState({
+    agents,
+    conversations,
+  });
 
-    fetchConversations();
-  }, [token]);
+  const { copilot } = useInboxCopilot({
+    apiUrl: API_URL,
+    token,
+    activeChat,
+  });
 
-  useEffect(() => {
-    if (!activeChat) {
-      setWsState('disconnected');
-      return;
-    }
+  const {
+    messages,
+    setMessages,
+    typingNotice,
+    wsState,
+    isThreadLoading,
+    sendRealtimeEvent,
+    typingTimeoutRef,
+  } = useConversationThread({
+    apiUrl: API_URL,
+    token,
+    activeChat,
+    setConversations,
+    setActiveChat,
+  });
 
-    let socket = null;
-    let reconnectTimer = null;
-    let shouldReconnect = true;
+  const { loadConversations } = useInboxConversationsLoader({
+    apiUrl: API_URL,
+    token,
+    filters,
+    navigate,
+    setConversations,
+    setActiveChat,
+    setAccessError,
+  });
 
-    const connect = () => {
-      setWsState('connecting');
-      socket = new WebSocket(`ws://localhost:8900/api/ws/${activeChat.id}`);
+  const {
+    selectedConversations,
+    isBulkActionLoading,
+    bulkAssignAgentId,
+    setBulkAssignAgentId,
+    clearSelection,
+    toggleSelectConversation,
+    toggleSelectAll,
+    handleBulkAction,
+    handleUpdateConversation,
+    handleAddTag,
+    handleRemoveTag,
+  } = useInboxConversationActions({
+    apiUrl: API_URL,
+    token,
+    activeChat,
+    setConversations,
+    setActiveChat,
+    loadConversations,
+  });
 
-      socket.onopen = () => {
-        setWsState('connected');
-      };
+  useInboxConversationStream({
+    apiUrl: API_URL,
+    token,
+    filters,
+    activeChatId: activeChat?.id,
+    setConversations,
+    setActiveChat,
+  });
 
-      socket.onmessage = (event) => {
-        const newMsg = JSON.parse(event.data);
-        setMessages((prev) => {
-          // Prevent duplicate inserts when message already exists in local state.
-          if (prev.find((m) => m.id === newMsg.id)) return prev;
-          return [...prev, newMsg];
-        });
-      };
+  const { handleSendMessage, handleFileChange, handlePromptChange } =
+    useInboxMessageComposer({
+      apiUrl: API_URL,
+      token,
+      activeChat,
+      messagePrompt,
+      setMessagePrompt,
+      isInternal,
+      setIsInternal,
+      attachment,
+      setAttachment,
+      isUploading,
+      setIsUploading,
+      setMessages,
+      sendRealtimeEvent,
+      typingTimeoutRef,
+    });
 
-      socket.onclose = () => {
-        if (!shouldReconnect) {
-          setWsState('disconnected');
-          return;
-        }
-        // Keep trying while this chat remains active.
-        setWsState('reconnecting');
-        reconnectTimer = setTimeout(connect, 1500);
-      };
+  const { handleCreateTicket, handleSimulateEmail, handleMergeConversation } =
+    useInboxSupportActions({
+      apiUrl: API_URL,
+      token,
+      activeChat,
+      copilot,
+      emailDraft,
+      setIsCreatingTicket,
+      setIsSubmittingEmail,
+      setShowEmailModal,
+      setEmailDraft,
+      setActiveChat,
+      setShowDetailsRail,
+      setShowMergeModal,
+      loadConversations,
+      defaultEmailDraft,
+    });
 
-      socket.onerror = () => {
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.close();
-        }
-      };
-    };
-
-    const fetchMessages = async () => {
-      try {
-        const res = await fetch(`http://localhost:8900/api/protected/conversations/${activeChat.id}/messages`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setMessages(data);
-        }
-      } catch (err) {
-        console.error("Failed to fetch messages", err);
-      }
-    };
-
-    fetchMessages();
-    connect();
-
-    return () => {
-      shouldReconnect = false;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (socket) socket.close();
-    };
-  }, [activeChat, token]);
-
-  const handleSendMessage = async () => {
-    if (!messagePrompt.trim() || !activeChat) return;
-
-    try {
-      const res = await fetch(`http://localhost:8900/api/protected/conversations/${activeChat.id}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ content: messagePrompt })
-      });
-
-      if (res.ok) {
-        const newMessage = await res.json();
-        setMessages((prev) => [...prev, newMessage]);
-        setMessagePrompt('');
-      }
-    } catch (err) {
-      console.error('Failed to send message', err);
-    }
-  };
+  const { activeCustomer, lastOutboundMessage } = useInboxDerivedData({
+    customers,
+    activeChat,
+    messages,
+  });
 
   return (
-    <div className="flex h-screen overflow-hidden font-sans bg-gray-50">
-		
-      <div className="flex flex-col w-80 bg-white border-r border-gray-200">
-        <div className="flex items-center justify-between p-4 bg-gray-50 border-b border-gray-200">
-          <h2 className="text-lg font-bold text-gray-800">Shared Inbox</h2>
-          <button onClick={handleLogout} className="text-sm text-red-500 hover:text-red-700">Logout</button>
-        </div>
-        
-        <div className="flex-1 overflow-y-auto">
-          {conversations.length === 0 ? (
-             <div className="p-4 text-sm text-center text-gray-500">No open conversations.</div>
-          ) : (
-            conversations.map((chat) => (
-              <div 
-                key={chat.id}
-                onClick={() => setActiveChat(chat)}
-                className={`p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors ${activeChat?.id === chat.id ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''}`}
+    <div className="app-main-surface h-full w-full overflow-hidden">
+      <ResizablePanels
+        storageKey={panelLayout.storageKey}
+        initialSizes={panelLayout.initialSizes}
+        minSizes={panelLayout.minSizes}
+        className="h-full w-full"
+        stackBelow={1180}
+      >
+        {showConversationRail && (
+          <InboxConversationRail
+            onShowEmailModal={() => setShowEmailModal(true)}
+            onHideConversationRail={() => setShowConversationRail(false)}
+            selectedCount={selectedConversations.size}
+            isBulkActionLoading={isBulkActionLoading}
+            onBulkResolve={() => handleBulkAction("resolve")}
+            onBulkReopen={() => handleBulkAction("reopen")}
+            onBulkSnooze={() => handleBulkAction("snooze")}
+            agents={agents}
+            bulkAssignAgentId={bulkAssignAgentId}
+            onBulkAssignAgentIdChange={setBulkAssignAgentId}
+            onBulkAssign={() =>
+              handleBulkAction("assign", {
+                assignee_id: bulkAssignAgentId,
+              })
+            }
+            onClearSelection={clearSelection}
+            accessError={accessError}
+            filterSummary={filterSummary}
+            showFilters={showFilters}
+            onToggleFilters={() => setShowFilters((prev) => !prev)}
+            activeFilterCount={activeFilterCount}
+            filters={filters}
+            setFilters={setFilters}
+            availableTags={availableTags}
+            onClearFilters={clearFilters}
+            onToggleSelectAll={() => toggleSelectAll(conversations)}
+            allSelected={selectedConversations.size === conversations.length}
+            hasConversations={conversations.length > 0}
+            conversations={conversations}
+            activeChatId={activeChat?.id}
+            selectedConversations={selectedConversations}
+            onToggleSelectConversation={toggleSelectConversation}
+            onSelectConversation={setActiveChat}
+          />
+        )}
+
+        <div
+          className="flex h-full min-h-0 min-w-0 flex-col"
+          style={{ background: "color-mix(in srgb, var(--app-card) 96%, transparent)" }}
+        >
+          {activeChat ? (
+            <>
+              <ActiveConversationHeader
+                key={activeChat.id}
+                activeChat={activeChat}
+                agents={agents}
+                wsState={wsState}
+                showConversationRail={showConversationRail}
+                showDetailsRail={showDetailsRail}
+                onToggleConversationRail={() =>
+                  setShowConversationRail((prev) => !prev)
+                }
+                onToggleDetailsRail={() => setShowDetailsRail((prev) => !prev)}
+                onOpenMerge={() => setShowMergeModal(true)}
+                onUpdateConversation={handleUpdateConversation}
+                onAddTag={handleAddTag}
+                onRemoveTag={handleRemoveTag}
+              />
+
+              <div
+                className="flex-1 space-y-4 overflow-y-auto p-6"
+                style={{ background: "color-mix(in srgb, var(--app-card-muted) 96%, transparent)" }}
               >
-                <div className="flex items-baseline justify-between mb-1">
-                  <h3 className="text-sm font-semibold text-gray-900">{chat.customer_name}</h3>
-                  <span className="text-xs text-gray-500 text-right">
-                    {new Date(chat.updated_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                  </span>
-                </div>
-                <p className="text-sm text-gray-600 truncate">{chat.preview}</p>
+                {isThreadLoading ? (
+                  <div className="app-empty-state px-5 py-4 text-sm">
+                    Loading conversation...
+                  </div>
+                ) : messages.length === 0 ? (
+                  <div className="app-empty-state px-5 py-4 text-sm">
+                    No messages in this conversation yet.
+                  </div>
+                ) : (
+                  messages.map((message) => (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      activeCustomerId={activeChat.customer_id}
+                      apiUrl={API_URL}
+                      lastOutboundMessageId={lastOutboundMessage?.id}
+                      customerLastReadAt={activeChat.customer_last_read_at}
+                    />
+                  ))
+                )}
               </div>
-            ))
+
+              <MessageComposer
+                typingNotice={typingNotice}
+                isInternal={isInternal}
+                setIsInternal={setIsInternal}
+                attachment={attachment}
+                setAttachment={setAttachment}
+                messagePrompt={messagePrompt}
+                onPromptChange={handlePromptChange}
+                isUploading={isUploading}
+                onSendMessage={handleSendMessage}
+                fileInputRef={fileInputRef}
+                onFileChange={handleFileChange}
+              />
+
+              <MergeConversationModal
+                open={showMergeModal}
+                activeChat={activeChat}
+                conversations={conversations}
+                onMerge={handleMergeConversation}
+                onClose={() => setShowMergeModal(false)}
+              />
+
+              <EmailSimulationModal
+                open={showEmailModal}
+                draft={emailDraft}
+                setDraft={setEmailDraft}
+                onSubmit={handleSimulateEmail}
+                onClose={() => setShowEmailModal(false)}
+                isSubmitting={isSubmittingEmail}
+              />
+            </>
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center text-gray-500">
+              <p>Select a conversation to start chatting.</p>
+              {!showConversationRail && (
+                <button
+                  type="button"
+                  onClick={() => setShowConversationRail(true)}
+                  className="app-secondary-button"
+                >
+                  Show conversation list
+                </button>
+              )}
+            </div>
           )}
         </div>
-      </div>
 
-      <div className="flex flex-col flex-1 bg-white">
-        {activeChat ? (
-          <>
-            <div className="flex items-center justify-between p-4 border-b border-gray-200 shadow-sm z-10">
-              <div>
-                <h2 className="text-lg font-bold text-gray-900">{activeChat.customer_name}</h2>
-                <span className="text-xs px-2 py-1 bg-green-100 text-green-800 rounded-full font-medium tracking-wide uppercase">
-                  {activeChat.status}
-                </span>
-                <p className="mt-1 text-xs text-gray-500 capitalize">Realtime: {wsState}</p>
-              </div>
-            </div>
-
-            <div className="flex-1 p-6 space-y-4 overflow-y-auto bg-gray-50">
-              {messages.map((msg) => {
-                const isCustomer = msg.sender_id === activeChat.customer_id;
-                
-                return (
-                  <div key={msg.id} className={`flex flex-col ${isCustomer ? 'items-start' : 'items-end'}`}>
-                    <span className="mb-1 ml-1 mr-1 text-xs text-gray-500">{msg.sender_name}</span>
-                    <div className={`p-3 max-w-lg shadow-sm text-sm ${isCustomer ? 'bg-white border border-gray-200 text-gray-800 rounded-2xl rounded-tl-none' : 'bg-blue-600 text-white rounded-2xl rounded-tr-none'}`}>
-                      {msg.content}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="p-4 bg-white border-t border-gray-200">
-              <div className="flex items-end overflow-hidden transition-all border border-gray-300 rounded-lg bg-gray-50 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent">
-                <textarea 
-                  rows="2"
-                  className="flex-1 p-3 text-sm bg-transparent outline-none resize-none"
-                  placeholder="Type your reply here..."
-                  value={messagePrompt}
-                  onChange={(e) => setMessagePrompt(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendMessage();
-                    }
-                  }}
-                />
-                <button 
-                  onClick={handleSendMessage}
-                  className="px-4 py-2 m-2 font-medium text-white transition-colors bg-blue-600 rounded-md hover:bg-blue-700"
-                >
-                  Send
-                </button>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="flex items-center justify-center flex-1 text-gray-500">
-            Select a conversation to start chatting.
+        {showDetailsRail && (
+          <div className="flex h-full min-h-0 min-w-0 flex-col border-l app-surface-divider app-main-surface">
+            <InboxDetailsRail
+              activeChat={activeChat}
+              activeCustomer={activeCustomer}
+              conversations={conversations}
+              agents={agents}
+              copilot={copilot}
+              isUploading={isUploading}
+              isCreatingTicket={isCreatingTicket}
+              onSetMessagePrompt={setMessagePrompt}
+              onSendSuggestedReply={handleSendMessage}
+              onCreateTicket={handleCreateTicket}
+            />
           </div>
         )}
-      </div>
-
-      {activeChat && (
-        <div className="flex flex-col border-l border-gray-200 w-72 bg-gray-50">
-          <div className="p-5 border-b border-gray-200">
-            <div className="flex items-center justify-center w-16 h-16 mx-auto mb-3 text-2xl font-bold text-blue-600 bg-blue-100 rounded-full">
-              {activeChat.customer_name.charAt(0)}
-            </div>
-            <h3 className="font-bold text-center text-gray-900">{activeChat.customer_name}</h3>
-            <p className="mb-4 text-sm text-center text-gray-500">Customer via Web Widget</p>
-          </div>
-
-          <div className="flex-1 p-5 bg-gradient-to-b from-purple-50 to-white">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-purple-600">✨</span>
-              <h3 className="font-bold text-purple-900">AI Copilot</h3>
-            </div>
-            <div className="p-3 text-sm italic text-gray-700 bg-white border border-purple-100 rounded-lg shadow-sm">
-              "I will generate suggested replies here once Gemini is integrated!"
-            </div>
-          </div>
-        </div>
-      )}
+      </ResizablePanels>
     </div>
   );
 }

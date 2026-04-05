@@ -3,12 +3,13 @@ package models
 import "time"
 
 type User struct {
-	ID           string    `json:"id"`
-	Role         string    `json:"role"`
-	Name         string    `json:"name"`
-	Email        string    `json:"email"`
-	PasswordHash string    `json:"-"` // The "-" ensures the password hash is never sent in JSON responses
-	CreatedAt    time.Time `json:"created_at"`
+	ID               string                 `json:"id"`
+	Role             string                 `json:"role"`
+	Name             string                 `json:"name"`
+	Email            string                 `json:"email"`
+	PasswordHash     string                 `json:"-"` // The "-" ensures the password hash is never sent in JSON responses
+	CreatedAt        time.Time              `json:"created_at"`
+	CustomAttributes map[string]interface{} `json:"custom_attributes,omitempty"`
 }
 
 // AuthPayload is the JSON structure we expect when a user logs in or registers

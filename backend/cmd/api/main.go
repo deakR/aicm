@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
+	"deakr/aicm/internal/ai"
 	"deakr/aicm/internal/database"
 	"deakr/aicm/internal/server"
 
@@ -27,7 +30,14 @@ func main() {
 	db := database.New()
 	defer db.Close()
 
-	srv := server.New(db)
+	aiService := ai.New()
+	defer aiService.Close()
+
+	srv := server.New(db, aiService)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv.StartScheduler(ctx)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -35,5 +45,14 @@ func main() {
 	}
 
 	fmt.Printf("Starting server on port %s...\n", port)
-	log.Fatal(http.ListenAndServe(":"+port, srv.Router))
+	httpServer := &http.Server{
+		Addr:              ":" + port,
+		Handler:           srv.Router,
+		ReadTimeout:       15 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+	log.Fatal(httpServer.ListenAndServe())
 }

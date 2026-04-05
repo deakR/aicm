@@ -3,15 +3,38 @@
 **/.env
 !.env.example
 !**/.env.example
+.envrc
+.direnv/
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.jks
+*.keystore
+id_rsa
+id_ed25519
+*.secret
+*.secrets
+secrets/
+credentials/
 
 # Go build artifacts
 backend/tmp/
 backend/*.exe
 *.exe
+backend/coverage
+backend/coverage.out
+coverage
+coverage.out
 
 # Frontend dependencies/build
 frontend/node_modules/
 frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+output/
 
 # OS/editor noise
 .DS_Store
@@ -21,3 +44,12 @@ Thumbs.db
 
 # personal reference
 codecat_output.md
+references/
+.playwright-cli/
+backend/backend.log
+backend/uploads/
+temp_regression_upload.txt
+designs/
+
+build_and_push.ps1
+build_and_push.sh

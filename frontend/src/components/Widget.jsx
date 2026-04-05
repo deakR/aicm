@@ -1,16 +1,86 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from "react";
+import {
+  buildBrandPalette,
+} from "../branding";
+import { useThemePreference } from "../theme";
+import useBranding from "../context/useBranding";
+import { stripHtml } from "../utils/contentHelpers";
+import {
+  clearStoredToken,
+  consumeWidgetResumeRequested,
+  getCurrentSession,
+  markWidgetResumeRequested,
+  setPostLoginPath,
+} from "../auth";
 
-export default function Widget() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [session, setSession] = useState(null); // { token, conversationId }
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8900";
+
+export default function Widget({ embedded = false }) {
+  const [isOpen, setIsOpen] = useState(embedded);
+  const [activeTab, setActiveTab] = useState("chat");
+  const [session, setSession] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
-  const [userForm, setUserForm] = useState({ name: '', email: '' });
-  const [wsState, setWsState] = useState('disconnected');
+  const [input, setInput] = useState("");
+  const [wsState, setWsState] = useState("disconnected");
+  const [articles, setArticles] = useState([]);
+  const [articleSearch, setArticleSearch] = useState("");
+  const [selectedArticle, setSelectedArticle] = useState(null);
+  const [isArticlesLoading, setIsArticlesLoading] = useState(false);
+  const { branding } = useBranding();
+  const [typingNotice, setTypingNotice] = useState("");
+  const [readState, setReadState] = useState({
+    customer_last_read_at: "",
+    agent_last_read_at: "",
+  });
+  const [attachment, setAttachment] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const socketRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
+  const { resolvedTheme } = useThemePreference();
+  const palette = buildBrandPalette(branding.accent_color);
+  const isDark = resolvedTheme === "dark";
+  const viewerSession = getCurrentSession();
+  const chromeSurface = isDark
+    ? "border-slate-800 bg-slate-950 text-slate-100"
+    : "border-gray-200 bg-white text-slate-900";
+  const mutedSurface = isDark ? "bg-slate-900" : "bg-gray-50";
+  const cardSurface = isDark
+    ? "border-slate-800 bg-slate-900 text-slate-100"
+    : "border-gray-200 bg-white text-slate-900";
+  const inputSurface = isDark
+    ? "border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-500"
+    : "border-gray-200 bg-gray-50 text-slate-900 placeholder:text-gray-400";
+  const softPanelSurface = isDark
+    ? "border-slate-800 bg-slate-950"
+    : "border-gray-200 bg-white";
+
+  const sendRealtimeEvent = (payload) => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify(payload));
+    }
+  };
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (embedded) {
+      setIsOpen(true);
+    }
+  }, [embedded]);
+
+  useEffect(() => {
+    if (embedded || !viewerSession.isAuthenticated || viewerSession.role !== "customer") {
+      return;
+    }
+
+    if (consumeWidgetResumeRequested()) {
+      setIsOpen(true);
+      setActiveTab("chat");
+    }
+  }, [embedded, viewerSession.isAuthenticated, viewerSession.role]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   useEffect(() => {
@@ -20,30 +90,88 @@ export default function Widget() {
     let reconnectTimer = null;
     let shouldReconnect = true;
 
+    const fetchMessages = async () => {
+      const res = await fetch(
+        `${API_URL}/api/protected/conversations/${session.conversationId}/messages`,
+        {
+          headers: { Authorization: `Bearer ${session.token}` },
+        },
+      );
+      if (res.ok) {
+        setMessages(await res.json());
+        sendRealtimeEvent({ type: "read_receipt" });
+      }
+    };
+
     const connect = () => {
-      setWsState('connecting');
-      socket = new WebSocket(`ws://localhost:8900/api/ws/${session.conversationId}`);
+      setWsState("connecting");
+      const wsProtocol = API_URL.startsWith("https") ? "wss" : "ws";
+      const wsUrl = `${API_URL.replace(/^http/, wsProtocol)}/api/ws/${session.conversationId}?token=${encodeURIComponent(session.token)}`;
+      socket = new WebSocket(wsUrl);
+      socketRef.current = socket;
 
       socket.onopen = () => {
-        setWsState('connected');
+        setWsState("connected");
+        fetchMessages();
+        sendRealtimeEvent({ type: "read_receipt" });
       };
 
       socket.onmessage = (event) => {
-        const newMsg = JSON.parse(event.data);
+        const incoming = JSON.parse(event.data);
+
+        if (incoming?.type === "typing") {
+          const payload = incoming.payload || {};
+          if (payload.role !== "customer") {
+            setTypingNotice(
+              payload.is_typing
+                ? `${payload.name || "Support"} is typing...`
+                : "",
+            );
+          }
+          return;
+        }
+
+        if (incoming?.type === "read_receipt") {
+          setReadState({
+            customer_last_read_at:
+              incoming.payload?.customer_last_read_at || "",
+            agent_last_read_at: incoming.payload?.agent_last_read_at || "",
+          });
+          return;
+        }
+
+        if (incoming?.type === "conversation_update") {
+          if (
+            incoming.payload?.customer_last_read_at ||
+            incoming.payload?.agent_last_read_at
+          ) {
+            setReadState({
+              customer_last_read_at:
+                incoming.payload.customer_last_read_at || "",
+              agent_last_read_at: incoming.payload.agent_last_read_at || "",
+            });
+          }
+          return;
+        }
+
+        const newMsg = incoming;
+        setTypingNotice("");
         setMessages((prev) => {
-          // Ignore duplicates when we already appended the optimistic send result.
           if (prev.find((m) => m.id === newMsg.id)) return prev;
           return [...prev, newMsg];
         });
+
+        if (newMsg?.sender_id !== session.userId) {
+          sendRealtimeEvent({ type: "read_receipt" });
+        }
       };
 
       socket.onclose = () => {
         if (!shouldReconnect) {
-          setWsState('disconnected');
+          setWsState("disconnected");
           return;
         }
-        // Short fixed-delay reconnect is enough for prototype reliability.
-        setWsState('reconnecting');
+        setWsState("reconnecting");
         reconnectTimer = setTimeout(connect, 1500);
       };
 
@@ -54,153 +182,722 @@ export default function Widget() {
       };
     };
 
-    const fetchMessages = async () => {
-      const res = await fetch(`http://localhost:8900/api/protected/conversations/${session.conversationId}/messages`, {
-        headers: { Authorization: `Bearer ${session.token}` },
-      });
-      if (res.ok) setMessages(await res.json());
-    };
-
     fetchMessages();
     connect();
+    const refreshTimer = setInterval(fetchMessages, 8000);
 
     return () => {
       shouldReconnect = false;
+      clearInterval(refreshTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      socketRef.current = null;
       if (socket) socket.close();
     };
   }, [session]);
 
-  const handleStartChat = async (e) => {
-    e.preventDefault();
+  useEffect(() => {
+    setReadState({ customer_last_read_at: "", agent_last_read_at: "" });
+    setTypingNotice("");
+  }, [session?.conversationId]);
 
-    const res = await fetch('http://localhost:8900/api/widget/init', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(userForm),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      const nextSession = {
-        token: data.token,
-        conversationId: data.conversation_id,
-      };
-      setSession(nextSession);
-      sessionStorage.setItem('widget_session', JSON.stringify(nextSession));
+  useEffect(() => {
+    if (!isOpen || activeTab !== "chat") {
+      return;
     }
-  };
+
+    if (!viewerSession.isAuthenticated || viewerSession.role !== "customer") {
+      setSession(null);
+      setMessages([]);
+      setWsState("disconnected");
+      return;
+    }
+
+    let isCancelled = false;
+
+    const initializeChatSession = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/protected/customer/chat-session`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${viewerSession.token}`,
+          },
+        });
+
+        if (response.status === 401) {
+          clearStoredToken();
+          setSession(null);
+          return;
+        }
+
+        if (!response.ok) {
+          return;
+        }
+
+        const data = await response.json();
+        if (isCancelled) {
+          return;
+        }
+
+        setSession({
+          token: viewerSession.token,
+          conversationId: data.conversation_id,
+          userId: viewerSession.userId,
+        });
+      } catch (error) {
+        console.error("Failed to initialize customer chat session", error);
+      }
+    };
+
+    initializeChatSession();
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeTab, isOpen, viewerSession.isAuthenticated, viewerSession.role, viewerSession.token, viewerSession.userId]);
+
+  useEffect(() => {
+    if (!isOpen || articles.length > 0) return;
+
+    const fetchArticles = async () => {
+      setIsArticlesLoading(true);
+      try {
+        const res = await fetch(`${API_URL}/api/articles`);
+        if (res.ok) {
+          setArticles(await res.json());
+        }
+      } catch (err) {
+        console.error("Failed to fetch widget articles", err);
+      } finally {
+        setIsArticlesLoading(false);
+      }
+    };
+
+    fetchArticles();
+  }, [isOpen, articles.length]);
 
   const handleSend = async (e) => {
     e.preventDefault();
-    if (!input.trim() || !session) return;
+    if ((!input.trim() && !attachment) || !session || isUploading) return;
 
-    const res = await fetch(`http://localhost:8900/api/protected/conversations/${session.conversationId}/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.token}`,
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    sendRealtimeEvent({ type: "typing", is_typing: false });
+    setIsUploading(true);
+
+    let uploadedFile = null;
+    if (attachment) {
+      const formData = new FormData();
+      formData.append("file", attachment);
+      try {
+        const uploadRes = await fetch(`${API_URL}/api/protected/upload`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.token}` },
+          body: formData,
+        });
+        if (uploadRes.ok) {
+          uploadedFile = await uploadRes.json();
+        } else {
+          console.error("Failed to upload attachment");
+          setIsUploading(false);
+          return;
+        }
+      } catch (err) {
+        console.error("Upload error", err);
+        setIsUploading(false);
+        return;
+      }
+    }
+
+    const payload = { content: input.trim() };
+    if (uploadedFile) {
+      payload.attachment_url = uploadedFile.url;
+      payload.attachment_name = uploadedFile.name;
+      payload.attachment_type = uploadedFile.type;
+    }
+
+    const res = await fetch(
+      `${API_URL}/api/protected/conversations/${session.conversationId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.token}`,
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify({ content: input }),
-    });
+    );
 
+    setIsUploading(false);
     if (res.ok) {
       const newMsg = await res.json();
-      setMessages((prev) => [...prev, newMsg]);
-      setInput('');
+      setMessages((prev) => {
+        if (prev.find((m) => m.id === newMsg.id)) return prev;
+        return [...prev, newMsg];
+      });
+      setInput("");
+      setAttachment(null);
     }
   };
 
-  useEffect(() => {
-    const raw = sessionStorage.getItem('widget_session');
-    if (!raw) return;
-
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed?.token && parsed?.conversationId) {
-        setSession(parsed);
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        alert("File is too large. Max size is 5MB.");
+        return;
       }
-    } catch {
-      sessionStorage.removeItem('widget_session');
+      setAttachment(file);
     }
-  }, []);
+  };
+
+  const handleInputChange = (e) => {
+    const value = e.target.value;
+    setInput(value);
+
+    if (!session) {
+      return;
+    }
+
+    sendRealtimeEvent({ type: "typing", is_typing: value.trim().length > 0 });
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    typingTimeoutRef.current = setTimeout(() => {
+      sendRealtimeEvent({ type: "typing", is_typing: false });
+    }, 1200);
+  };
+
+  const lastCustomerMessage = [...messages]
+    .filter(
+      (message) =>
+        !message.is_internal &&
+        (message.sender_id === session?.userId ||
+          message.sender_role === "customer"),
+    )
+    .at(-1);
+
+  const filteredArticles = articles.filter((article) => {
+    const term = articleSearch.trim().toLowerCase();
+    if (!term) return true;
+    return [
+      article.title,
+      article.collection,
+      article.section,
+      stripHtml(article.content),
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(term);
+  });
+
+  const openArticle = async (articleId) => {
+    try {
+      const res = await fetch(`${API_URL}/api/articles/${articleId}`);
+      if (res.ok) {
+        const article = await res.json();
+        setSelectedArticle(article);
+        setArticles((prev) =>
+          prev.map((entry) => (entry.id === article.id ? article : entry)),
+        );
+      }
+    } catch (err) {
+      console.error("Failed to load widget article", err);
+    }
+  };
+
+  const emptyChatGreeting =
+    branding.ai_greeting?.trim?.() ||
+    branding.greeting?.trim() ||
+    "Hi there! How can I help you today?";
+
+  let headerSubtitle = "Chat with AI or browse help articles";
+  if (activeTab === "help") {
+    headerSubtitle = "Search our help center";
+  } else if (activeTab === "chat" && session && wsState === "connected") {
+    headerSubtitle = "Connected · We're here to help";
+  } else if (
+    activeTab === "chat" &&
+    (wsState === "reconnecting" || wsState === "connecting")
+  ) {
+    headerSubtitle = "Connecting...";
+  }
+
+  const prepareCustomerAuthReturn = () => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const targetPath = currentPath === "/" ? "/help" : currentPath || "/help";
+    setPostLoginPath(targetPath);
+    markWidgetResumeRequested();
+  };
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 font-sans">
+    <div
+      className={
+        embedded
+          ? "h-full w-full font-sans"
+          : "fixed bottom-6 right-6 z-50 font-sans"
+      }
+    >
       {isOpen && (
-        <div className="w-80 h-96 bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden mb-4 border border-gray-200 transition-all duration-300 transform origin-bottom-right">
-          <div className="bg-blue-600 p-4 text-white flex justify-between items-center">
-            <div>
-              <h3 className="font-bold">Support Chat</h3>
-              {session && (
-                <p className="text-[11px] text-blue-100 capitalize">{wsState}</p>
+        <div
+          className={`flex flex-col overflow-hidden border transition-all duration-300 ${chromeSurface} ${
+            embedded
+              ? "h-full w-full rounded-none border-0 shadow-none"
+              : "mb-4 h-[34rem] w-[22rem] origin-bottom-right rounded-2xl shadow-2xl"
+          }`}
+        >
+          <div
+            className="p-4 text-white"
+            style={{
+              backgroundImage: `linear-gradient(135deg, ${palette.accentDark}, ${palette.accent})`,
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-bold">{branding.brand_name}</h3>
+                <p className="text-[11px] text-white/80">
+                  {headerSubtitle}
+                </p>
+              </div>
+              {!embedded && (
+                <button
+                  onClick={() => setIsOpen(false)}
+                  aria-label="Close support chat"
+                  className="text-lg leading-none text-white/80 hover:text-white"
+                >
+                  ×
+                </button>
               )}
             </div>
-            <button onClick={() => setIsOpen(false)} className="text-blue-100 hover:text-white">x</button>
+            <div className="mt-3 grid grid-cols-2 gap-2 rounded-xl bg-white/15 p-1">
+              <button
+                type="button"
+                onClick={() => setActiveTab("chat")}
+                aria-label="Open chat tab"
+                className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${activeTab === "chat" ? "bg-white" : "text-white/85"}`}
+                style={
+                  activeTab === "chat"
+                    ? { color: palette.accentDark }
+                    : undefined
+                }
+              >
+                Chat
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("help")}
+                aria-label="Open help center tab"
+                className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${activeTab === "help" ? "bg-white" : "text-white/85"}`}
+                style={
+                  activeTab === "help"
+                    ? { color: palette.accentDark }
+                    : undefined
+                }
+              >
+                Help Center
+              </button>
+            </div>
           </div>
 
-          {!session ? (
-            <div className="flex-1 p-6 bg-gray-50 flex flex-col justify-center">
-              <p className="text-gray-600 mb-4 text-sm text-center">Hi there! To start a chat, please introduce yourself.</p>
-              <form onSubmit={handleStartChat} className="space-y-3">
+          {activeTab === "help" ? (
+            <div className={`flex flex-1 flex-col ${mutedSurface}`}>
+              <div className={`border-b p-3 ${softPanelSurface}`}>
                 <input
-                  required
                   type="text"
-                  placeholder="Name"
-                  className="w-full p-2 border rounded-md text-sm outline-none focus:border-blue-500"
-                  value={userForm.name}
-                  onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
+                  placeholder="Search help articles..."
+                  className={`w-full rounded-xl border px-3 py-2 text-sm outline-none ${inputSurface}`}
+                  value={articleSearch}
+                  onChange={(e) => setArticleSearch(e.target.value)}
+                  style={{
+                    borderColor: selectedArticle
+                      ? palette.accentBorder
+                      : undefined,
+                  }}
                 />
-                <input
-                  required
-                  type="email"
-                  placeholder="Email"
-                  className="w-full p-2 border rounded-md text-sm outline-none focus:border-blue-500"
-                  value={userForm.email}
-                  onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
-                />
-                <button type="submit" className="w-full bg-blue-600 text-white p-2 rounded-md font-medium hover:bg-blue-700 transition">Start Chat</button>
-              </form>
+              </div>
+              {selectedArticle ? (
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedArticle(null)}
+                    className="text-xs font-semibold"
+                    style={{ color: palette.accentDark }}
+                  >
+                    Back to articles
+                  </button>
+                  <div className={`rounded-2xl border p-4 shadow-sm ${cardSurface}`}>
+                    <h4 className="text-lg font-semibold" style={{ color: "var(--app-text)" }}>
+                      {selectedArticle.title}
+                    </h4>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <span
+                        className="rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]"
+                        style={{
+                          background: "color-mix(in srgb, var(--brand-accent-soft) 72%, var(--app-card))",
+                          color: palette.accentDark,
+                        }}
+                      >
+                        {selectedArticle.collection || "General"}
+                      </span>
+                      <span
+                        className="rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]"
+                        style={{
+                          background: "var(--app-card-muted)",
+                          color: "var(--app-text-muted)",
+                        }}
+                      >
+                        {selectedArticle.section || "General"}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-[11px] uppercase tracking-[0.18em]" style={{ color: "var(--app-text-soft)" }}>
+                      {selectedArticle.view_count ?? 0} views
+                    </p>
+                    <div
+                      className="mt-3 prose prose-sm max-w-none text-sm leading-6"
+                      style={{ color: "var(--app-text-muted)" }}
+                      dangerouslySetInnerHTML={{
+                        __html: selectedArticle.content,
+                      }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("chat")}
+                    className="w-full rounded-xl px-4 py-2 text-sm font-semibold text-white"
+                    style={{ backgroundColor: palette.accent }}
+                  >
+                    Ask about this article
+                  </button>
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {isArticlesLoading ? (
+                    <p className="mt-8 text-center text-sm" style={{ color: "var(--app-text-muted)" }}>
+                      Loading articles...
+                    </p>
+                  ) : filteredArticles.length === 0 ? (
+                    <p className="mt-8 text-center text-sm" style={{ color: "var(--app-text-muted)" }}>
+                      No help articles match this search yet.
+                    </p>
+                  ) : (
+                    filteredArticles.map((article) => (
+                      <button
+                        key={article.id}
+                        type="button"
+                        onClick={() => openArticle(article.id)}
+                        className={`w-full rounded-2xl border p-4 text-left shadow-sm transition hover:shadow-md ${cardSurface}`}
+                        style={{ borderColor: palette.accentBorder }}
+                      >
+                        <div className="mb-2 flex flex-wrap gap-2">
+                          <span
+                            className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em]"
+                            style={{
+                              background: "color-mix(in srgb, var(--brand-accent-soft) 72%, var(--app-card))",
+                              color: palette.accentDark,
+                            }}
+                          >
+                            {article.collection || "General"}
+                          </span>
+                          <span
+                            className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em]"
+                            style={{
+                              background: "var(--app-card-muted)",
+                              color: "var(--app-text-muted)",
+                            }}
+                          >
+                            {article.section || "General"}
+                          </span>
+                        </div>
+                        <div className="text-sm font-semibold" style={{ color: "var(--app-text)" }}>
+                          {article.title}
+                        </div>
+                        <div className="mt-2 line-clamp-3 text-xs leading-5" style={{ color: "var(--app-text-muted)" }}>
+                          {stripHtml(article.content)}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          ) : !session ? (
+            <div className={`flex flex-1 flex-col justify-center p-6 ${mutedSurface}`}>
+              <div className="app-detail-card rounded-3xl p-5 text-center">
+                <p className="text-sm font-semibold" style={{ color: "var(--app-text)" }}>
+                  {viewerSession.isAuthenticated && viewerSession.role !== "customer"
+                    ? "Customer chat is only available for signed-in customer accounts."
+                    : `Welcome to ${branding.brand_name}.`}
+                </p>
+                <p className="mt-3 text-sm leading-6" style={{ color: "var(--app-text-muted)" }}>
+                  {viewerSession.isAuthenticated && viewerSession.role !== "customer"
+                    ? "You are currently signed in with a workspace account. Use the support inbox for internal replies, or sign in as a customer to test the public chat."
+                    : "Customers must sign in or register before starting chat. Once signed in, this widget opens the authenticated support conversation automatically."}
+                </p>
+                <div className="mt-5 flex flex-col gap-3">
+                  {!viewerSession.isAuthenticated ? (
+                    <>
+                        <a
+                          href="/login"
+                          onClick={prepareCustomerAuthReturn}
+                          className="app-primary-button w-full text-center"
+                        >
+                          Customer Sign In
+                        </a>
+                        <a
+                          href="/register"
+                          onClick={prepareCustomerAuthReturn}
+                          className="app-secondary-button w-full text-center"
+                        >
+                          Create Customer Account
+                        </a>
+                    </>
+                  ) : viewerSession.role !== "customer" ? (
+                    <>
+                        <a
+                          href="/login"
+                          onClick={prepareCustomerAuthReturn}
+                          className="app-secondary-button w-full text-center"
+                        >
+                          Switch to Customer Login
+                        </a>
+                      <a
+                        href="/inbox"
+                        className="app-link-action w-full text-center"
+                      >
+                        Open Support Inbox
+                      </a>
+                    </>
+                  ) : (
+                    <p className="text-xs" style={{ color: "var(--app-text-soft)" }}>
+                      Preparing your chat session...
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
           ) : (
             <>
-              <div className="flex-1 p-4 overflow-y-auto bg-gray-50 space-y-3">
-                {messages.length === 0 && <p className="text-center text-xs text-gray-400 mt-4">Send a message to start...</p>}
-                {messages.map((msg) => {
-                  const isCustomer = msg.sender_name !== 'Agent';
-                  return (
-                    <div key={msg.id} className={`flex flex-col ${isCustomer ? 'items-end' : 'items-start'}`}>
-                      <div className={`p-2 px-3 text-sm max-w-[85%] shadow-sm ${isCustomer ? 'bg-blue-600 text-white rounded-2xl rounded-tr-none' : 'bg-white border border-gray-200 text-gray-800 rounded-2xl rounded-tl-none'}`}>
-                        {msg.content}
-                      </div>
+              <div className={`flex-1 space-y-4 overflow-y-auto p-4 ${mutedSurface}`}>
+                {messages.length === 0 && (
+                  <div className="flex flex-col items-start">
+                    <span className="app-message-sender-ai mb-1 inline-flex items-center gap-2 text-[11px] font-medium">
+                      <span className="app-message-dot-ai inline-block h-2 w-2 rounded-full"></span>
+                      {branding.assistant_name || "AI Agent"}
+                    </span>
+                    <div className="app-message-bubble-ai max-w-[85%] rounded-2xl rounded-tl-none px-3 py-2 text-sm shadow-sm">
+                      {emptyChatGreeting}
                     </div>
-                  );
-                })}
+                  </div>
+                )}
+                {messages
+                  .filter((m) => !m.is_internal)
+                  .map((msg) => {
+                    const isCustomer =
+                      msg.sender_id === session?.userId ||
+                      msg.sender_role === "customer";
+                    const isAI = msg.is_ai_generated;
+                    const senderLabel = isAI
+                      ? "AI Agent"
+                      : isCustomer
+                        ? msg.sender_name
+                        : msg.sender_name || "Support Team";
+                    return (
+                      <div
+                        key={msg.id}
+                        className={`flex flex-col ${isCustomer ? "items-end" : "items-start"}`}
+                      >
+                        {!isCustomer && (
+                          <span
+                            className={`mb-1 inline-flex items-center gap-2 text-[11px] font-medium ${isAI ? "app-message-sender-ai" : "app-message-sender-support"}`}
+                          >
+                            <span
+                              className={`inline-block h-2 w-2 rounded-full ${isAI ? "app-message-dot-ai" : "app-message-dot-support"}`}
+                            ></span>
+                            {senderLabel}
+                          </span>
+                        )}
+                        <div
+                          className={`max-w-[85%] break-words rounded-2xl p-2 px-3 text-sm shadow-sm ${
+                            isCustomer
+                              ? "rounded-tr-none text-white"
+                              : isAI
+                                ? "rounded-tl-none app-message-bubble-ai"
+                                : "rounded-tl-none app-message-bubble-support"
+                          }`}
+                          style={
+                            isCustomer
+                              ? { backgroundColor: palette.accent }
+                              : undefined
+                          }
+                        >
+                          {msg.content}
+                          {msg.attachment_url && (
+                            <div className="mt-2 text-left">
+                              {msg.attachment_type?.startsWith("image/") ? (
+                                <a
+                                  href={`${API_URL}${msg.attachment_url}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  <img
+                                    src={`${API_URL}${msg.attachment_url}`}
+                                    alt={msg.attachment_name}
+                                    className="max-w-[12rem] rounded-lg shadow-sm"
+                                  />
+                                </a>
+                              ) : (
+                                <a
+                                  href={`${API_URL}${msg.attachment_url}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-2 rounded-lg bg-black/10 px-3 py-2 text-xs font-semibold hover:bg-black/20"
+                                >
+                                  📎 {msg.attachment_name}
+                                </a>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <span
+                          className="mt-1 text-[10px]"
+                          style={{ color: "var(--app-text-soft)" }}
+                        >
+                          {new Date(msg.created_at).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                        {isCustomer &&
+                          lastCustomerMessage?.id === msg.id &&
+                          readState.agent_last_read_at &&
+                          new Date(readState.agent_last_read_at) >=
+                            new Date(msg.created_at) && (
+                            <span className="app-read-receipt mt-1 text-[10px] font-medium">
+                              Seen by support
+                            </span>
+                          )}
+                      </div>
+                    );
+                  })}
+                {typingNotice && (
+                  <div
+                    className="text-xs font-medium"
+                    style={{ color: "var(--app-text-muted)" }}
+                  >
+                    {typingNotice}
+                  </div>
+                )}
                 <div ref={messagesEndRef} />
               </div>
-              <form onSubmit={handleSend} className="p-3 bg-white border-t flex items-center gap-2">
-                <input
-                  type="text"
-                  placeholder="Type a message..."
-                  className="flex-1 p-2 bg-gray-100 rounded-full text-sm outline-none px-4"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                />
-                <button type="submit" className="bg-blue-600 text-white p-2 rounded-full w-9 h-9 flex items-center justify-center hover:bg-blue-700">{'->'}</button>
-              </form>
+              <div className={`flex flex-col border-t p-3 ${softPanelSurface}`}>
+                {attachment && (
+                  <div
+                    className="mb-2 flex items-center justify-between rounded-xl px-3 py-1.5 text-xs"
+                    style={{
+                      background: "var(--app-card-muted)",
+                      color: "var(--app-text-muted)",
+                    }}
+                  >
+                    <span className="truncate max-w-[12rem]">
+                      📎 {attachment.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setAttachment(null)}
+                      className="font-bold transition hover:text-rose-500"
+                      style={{ color: "var(--app-text-soft)" }}
+                    >
+                      x
+                    </button>
+                  </div>
+                )}
+                <form onSubmit={handleSend} className="flex items-center gap-2">
+                  <input
+                    type="file"
+                    className="hidden"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    accept="image/*,.pdf,.doc,.docx,.txt"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    aria-label="Attach file"
+                    className="flex h-9 w-9 flex-none items-center justify-center rounded-full transition"
+                    style={{ color: "var(--app-text-soft)" }}
+                    onMouseEnter={(event) => {
+                      event.currentTarget.style.background = "var(--app-card-muted)";
+                      event.currentTarget.style.color = "var(--app-text)";
+                    }}
+                    onMouseLeave={(event) => {
+                      event.currentTarget.style.background = "transparent";
+                      event.currentTarget.style.color = "var(--app-text-soft)";
+                    }}
+                  >
+                    <svg
+                      className="h-5 w-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+                      ></path>
+                    </svg>
+                  </button>
+                  <input
+                    type="text"
+                    placeholder="Type a message..."
+                    className={`flex-1 rounded-full border px-4 py-2 text-sm outline-none ${inputSurface} ${isDark ? "focus:bg-slate-900" : "focus:bg-white"}`}
+                    value={input}
+                    onChange={handleInputChange}
+                    disabled={isUploading}
+                  />
+                  <button
+                    type="submit"
+                    disabled={isUploading || (!input.trim() && !attachment)}
+                    className="flex h-9 w-9 items-center justify-center rounded-full p-2 text-white disabled:opacity-50"
+                    style={{ backgroundColor: palette.accent }}
+                  >
+                    {isUploading ? ".." : "→"}
+                  </button>
+                </form>
+              </div>
             </>
           )}
         </div>
       )}
 
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className={`w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-transform hover:scale-105 ${isOpen ? 'bg-gray-800' : 'bg-blue-600'}`}
-      >
-        <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-        </svg>
-      </button>
+      {!embedded && (
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          aria-label={isOpen ? "Close support chat" : "Open support chat"}
+          className="flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105"
+          style={{ backgroundColor: isOpen ? (isDark ? "#111827" : "#1F2937") : palette.accent }}
+        >
+          <svg
+            className="h-6 w-6 text-white"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+            />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

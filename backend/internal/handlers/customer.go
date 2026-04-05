@@ -1,0 +1,303 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"deakr/aicm/internal/database"
+	"deakr/aicm/internal/models"
+	"deakr/aicm/internal/ws"
+
+	"github.com/jackc/pgx/v5"
+)
+
+type CustomerHandler struct {
+	DB *database.Service
+}
+
+type customerConversationSummary struct {
+	ID                 string     `json:"id"`
+	Source             string     `json:"source"`
+	Subject            *string    `json:"subject,omitempty"`
+	Status             string     `json:"status"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	CustomerLastReadAt *time.Time `json:"customer_last_read_at,omitempty"`
+	AgentLastReadAt    *time.Time `json:"agent_last_read_at,omitempty"`
+	Preview            string     `json:"preview"`
+	LastSenderName     string     `json:"last_sender_name,omitempty"`
+	LastSenderRole     string     `json:"last_sender_role,omitempty"`
+}
+
+type customerOverviewResponse struct {
+	Profile             models.User                   `json:"profile"`
+	Conversations       []customerConversationSummary `json:"conversations"`
+	Tickets             []models.Ticket               `json:"tickets"`
+	RecentNotifications []models.TicketNotification   `json:"recent_notifications"`
+	Stats               map[string]int                `json:"stats"`
+}
+
+type customerChatSessionResponse struct {
+	ConversationID string `json:"conversation_id"`
+}
+
+// EnsureChatSession finds or creates the active web conversation for the signed-in customer.
+func (h *CustomerHandler) EnsureChatSession(w http.ResponseWriter, r *http.Request) {
+	userID, role, ok := requestIdentity(r)
+	if !ok || role != "customer" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	ctx := context.Background()
+
+	var conversationID string
+	err := h.DB.Pool.QueryRow(
+		ctx,
+		`SELECT id
+		 FROM conversations
+		 WHERE customer_id = $1
+		   AND source = 'web'
+		   AND status != 'resolved'
+		   AND merged_into_id IS NULL
+		 ORDER BY updated_at DESC
+		 LIMIT 1`,
+		userID,
+	).Scan(&conversationID)
+	if err != nil {
+		if err != pgx.ErrNoRows {
+			http.Error(w, "Failed to load customer conversation", http.StatusInternalServerError)
+			return
+		}
+
+		if createErr := h.DB.Pool.QueryRow(
+			ctx,
+			`INSERT INTO conversations (customer_id, source, status)
+			 VALUES ($1, 'web', 'open')
+			 RETURNING id`,
+			userID,
+		).Scan(&conversationID); createErr != nil {
+			http.Error(w, "Failed to create customer conversation", http.StatusInternalServerError)
+			return
+		}
+
+		wfEngine := &WorkflowHandler{DB: h.DB}
+		go wfEngine.EvaluateNewConversation(context.Background(), conversationID)
+
+		conversationHandler := &ConversationHandler{DB: h.DB}
+		if snapshot, snapshotErr := conversationHandler.loadConversationSnapshot(context.Background(), conversationID); snapshotErr == nil {
+			ws.BroadcastSupport(map[string]interface{}{
+				"type":    "conversation_update",
+				"payload": snapshot,
+			})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(customerChatSessionResponse{
+		ConversationID: conversationID,
+	})
+}
+
+// GetOverview returns the current customer's profile, conversations, tickets, and notifications.
+func (h *CustomerHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
+	userID, role, ok := requestIdentity(r)
+	if !ok || role != "customer" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	ctx := context.Background()
+
+	var profile models.User
+	var attrsJSON string
+	err := h.DB.Pool.QueryRow(
+		ctx,
+		`SELECT id, role, name, email, created_at, COALESCE(custom_attributes::text, '{}')
+		 FROM users
+		 WHERE id = $1`,
+		userID,
+	).Scan(&profile.ID, &profile.Role, &profile.Name, &profile.Email, &profile.CreatedAt, &attrsJSON)
+	if err != nil {
+		http.Error(w, "Failed to load customer profile", http.StatusInternalServerError)
+		return
+	}
+	_ = json.Unmarshal([]byte(attrsJSON), &profile.CustomAttributes)
+
+	conversationRows, err := h.DB.Pool.Query(ctx, `
+		SELECT
+			c.id,
+			c.source,
+			c.subject,
+			c.status,
+			c.created_at,
+			c.updated_at,
+			c.customer_last_read_at,
+			c.agent_last_read_at,
+			COALESCE(
+				(
+					SELECT m.content
+					FROM messages m
+					WHERE m.conversation_id = c.id AND m.is_internal = false
+					ORDER BY m.created_at DESC
+					LIMIT 1
+				),
+				'No messages yet'
+			) AS preview,
+			COALESCE(
+				(
+					SELECT u.name
+					FROM messages m
+					JOIN users u ON u.id = m.sender_id
+					WHERE m.conversation_id = c.id AND m.is_internal = false
+					ORDER BY m.created_at DESC
+					LIMIT 1
+				),
+				''
+			) AS last_sender_name,
+			COALESCE(
+				(
+					SELECT u.role
+					FROM messages m
+					JOIN users u ON u.id = m.sender_id
+					WHERE m.conversation_id = c.id AND m.is_internal = false
+					ORDER BY m.created_at DESC
+					LIMIT 1
+				),
+				''
+			) AS last_sender_role
+		FROM conversations c
+		WHERE c.customer_id = $1 AND c.merged_into_id IS NULL
+		ORDER BY c.updated_at DESC
+	`, userID)
+	if err != nil {
+		http.Error(w, "Failed to load customer conversations", http.StatusInternalServerError)
+		return
+	}
+	defer conversationRows.Close()
+
+	conversations := []customerConversationSummary{}
+	stats := map[string]int{
+		"open_conversations":     0,
+		"pending_conversations":  0,
+		"resolved_conversations": 0,
+		"open_tickets":           0,
+		"resolved_tickets":       0,
+	}
+
+	for conversationRows.Next() {
+		var item customerConversationSummary
+		if scanErr := conversationRows.Scan(
+			&item.ID,
+			&item.Source,
+			&item.Subject,
+			&item.Status,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+			&item.CustomerLastReadAt,
+			&item.AgentLastReadAt,
+			&item.Preview,
+			&item.LastSenderName,
+			&item.LastSenderRole,
+		); scanErr != nil {
+			continue
+		}
+		item.Preview = excerptText(item.Preview, 180)
+		switch item.Status {
+		case "open":
+			stats["open_conversations"]++
+		case "pending":
+			stats["pending_conversations"]++
+		case "resolved":
+			stats["resolved_conversations"]++
+		}
+		conversations = append(conversations, item)
+	}
+
+	ticketRows, err := h.DB.Pool.Query(ctx, `
+		SELECT
+			t.id, t.conversation_id, t.customer_id, t.assignee_id, t.title, t.description, t.priority, t.status, t.created_at, t.updated_at,
+			c.name AS customer_name,
+			c.email AS customer_email,
+			a.name AS assignee_name,
+			(
+				SELECT MAX(created_at)
+				FROM ticket_notifications tn
+				WHERE tn.ticket_id = t.id
+			) AS last_customer_notification
+		FROM tickets t
+		JOIN users c ON t.customer_id = c.id
+		LEFT JOIN users a ON t.assignee_id = a.id
+		WHERE t.customer_id = $1
+		ORDER BY t.updated_at DESC
+	`, userID)
+	if err != nil {
+		http.Error(w, "Failed to load customer tickets", http.StatusInternalServerError)
+		return
+	}
+	defer ticketRows.Close()
+
+	tickets := []models.Ticket{}
+	for ticketRows.Next() {
+		var ticket models.Ticket
+		if scanErr := ticketRows.Scan(
+			&ticket.ID,
+			&ticket.ConversationID,
+			&ticket.CustomerID,
+			&ticket.AssigneeID,
+			&ticket.Title,
+			&ticket.Description,
+			&ticket.Priority,
+			&ticket.Status,
+			&ticket.CreatedAt,
+			&ticket.UpdatedAt,
+			&ticket.CustomerName,
+			&ticket.CustomerEmail,
+			&ticket.AssigneeName,
+			&ticket.LastCustomerNotification,
+		); scanErr != nil {
+			continue
+		}
+		if ticket.Status == "resolved" || ticket.Status == "closed" {
+			stats["resolved_tickets"]++
+		} else {
+			stats["open_tickets"]++
+		}
+		tickets = append(tickets, ticket)
+	}
+
+	notificationRows, err := h.DB.Pool.Query(ctx, `
+		SELECT id, ticket_id, customer_id, message, created_at
+		FROM ticket_notifications
+		WHERE customer_id = $1
+		ORDER BY created_at DESC
+		LIMIT 10
+	`, userID)
+	if err != nil {
+		http.Error(w, "Failed to load customer notifications", http.StatusInternalServerError)
+		return
+	}
+	defer notificationRows.Close()
+
+	notifications := []models.TicketNotification{}
+	for notificationRows.Next() {
+		var item models.TicketNotification
+		if scanErr := notificationRows.Scan(&item.ID, &item.TicketID, &item.CustomerID, &item.Message, &item.CreatedAt); scanErr != nil {
+			continue
+		}
+		notifications = append(notifications, item)
+	}
+
+	response := customerOverviewResponse{
+		Profile:             profile,
+		Conversations:       conversations,
+		Tickets:             tickets,
+		RecentNotifications: notifications,
+		Stats:               stats,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}

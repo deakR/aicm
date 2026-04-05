@@ -23,6 +23,10 @@ func RequireAuth(next http.Handler) http.Handler {
 
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 		jwtSecret := os.Getenv("JWT_SECRET")
+		if strings.TrimSpace(jwtSecret) == "" {
+			http.Error(w, "Server auth is not configured", http.StatusInternalServerError)
+			return
+		}
 
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			// Reject unexpected signing algorithms to avoid token confusion attacks.
