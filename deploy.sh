@@ -37,9 +37,13 @@ if [ -n "$DOCKER_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
   printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKER_USERNAME" --password-stdin
 fi
 
+echo "Checking if we need to remove conflicting old containers..."
+# Remove containers safely to avoid ContainerConfig bug in docker-compose v1
+"${COMPOSE_CMD[@]}" -f docker-compose.prod.yml rm -sf
+
 echo "Pulling latest Docker images and starting containers..."
 "${COMPOSE_CMD[@]}" -f docker-compose.prod.yml pull
-"${COMPOSE_CMD[@]}" -f docker-compose.prod.yml up -d
+"${COMPOSE_CMD[@]}" -f docker-compose.prod.yml up --force-recreate -d
 
 if [ "$RUN_DEMO_SEED" = "true" ]; then
   echo "Running reset_demo_data to seed the database with demo content..."
