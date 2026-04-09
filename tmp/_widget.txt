@@ -1,20 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   buildBrandPalette,
 } from "../branding";
-import useBranding from "../context/useBranding";
 import { useThemePreference } from "../theme";
+import useBranding from "../context/useBranding";
 import { stripHtml } from "../utils/contentHelpers";
 import { getSenderLabel } from "../utils/conversationDisplay";
-import { mergeThreadMessages } from "../utils/messageThread";
 import {
-  clearLastCustomerConversation,
   clearStoredToken,
   consumeWidgetResumeRequested,
   getCurrentSession,
-  getLastCustomerConversation,
   markWidgetResumeRequested,
-  rememberLastCustomerConversation,
   setPostLoginPath,
 } from "../auth";
 
@@ -52,78 +48,16 @@ export default function Widget({ embedded = false }) {
   const chromeSurface = isDark
     ? "border-slate-800 bg-slate-950 text-slate-100"
     : "border-gray-200 bg-white text-slate-900";
-  const widgetMutedSurfaceStyle = {
-    background: "var(--app-card-muted)",
-  };
-  const widgetCardStyle = {
-    background: "var(--app-card)",
-    borderColor: "var(--app-border)",
-    color: "var(--app-text)",
-  };
-  const widgetInputStyle = {
-    background: "var(--app-surface)",
-    borderColor: "var(--app-border)",
-    color: "var(--app-text)",
-  };
-
-  const initializeCustomerSession = useCallback(
-    async ({ createIfMissing = false } = {}) => {
-      if (!viewerSession.isAuthenticated || viewerSession.role !== "customer") {
-        setSession(null);
-        return null;
-      }
-
-      const preferredConversationId = getLastCustomerConversation(
-        viewerSession.userId,
-      );
-      const params = new URLSearchParams();
-      if (preferredConversationId) {
-        params.set("conversation_id", preferredConversationId);
-      }
-      if (!createIfMissing) {
-        params.set("create_if_missing", "false");
-      }
-
-      const query = params.toString();
-      const response = await fetch(
-        `${API_URL}/api/protected/customer/chat-session${query ? `?${query}` : ""}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${viewerSession.token}`,
-          },
-        },
-      );
-
-      if (response.status === 401) {
-        clearStoredToken();
-        setSession(null);
-        return null;
-      }
-
-      if (!response.ok) {
-        return null;
-      }
-
-      const data = await response.json();
-      const conversationId = data?.conversation_id || "";
-
-      if (conversationId) {
-        rememberLastCustomerConversation(viewerSession.userId, conversationId);
-      } else {
-        clearLastCustomerConversation(viewerSession.userId);
-      }
-
-      const nextSession = {
-        token: viewerSession.token,
-        conversationId,
-        userId: viewerSession.userId,
-      };
-      setSession(nextSession);
-      return nextSession;
-    },
-    [viewerSession.isAuthenticated, viewerSession.role, viewerSession.token, viewerSession.userId],
-  );
+  const mutedSurface = isDark ? "bg-slate-900" : "bg-gray-50";
+  const cardSurface = isDark
+    ? "border-slate-800 bg-slate-900 text-slate-100"
+    : "border-gray-200 bg-white text-slate-900";
+  const inputSurface = isDark
+    ? "border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-500"
+    : "border-gray-200 bg-gray-50 text-slate-900 placeholder:text-gray-400";
+  const softPanelSurface = isDark
+    ? "border-slate-800 bg-slate-950"
+    : "border-gray-200 bg-white";
 
   const sendRealtimeEvent = (payload) => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -190,12 +124,7 @@ export default function Widget({ embedded = false }) {
         return;
       }
 
-      setMessages((prev) =>
-        mergeThreadMessages(
-          prev,
-          fetchedMessages.filter((message) => !message.is_internal),
-        ),
-      );
+      setMessages(fetchedMessages.filter((message) => !message.is_internal));
       sendRealtimeEvent({ type: "read_receipt" });
     };
 
@@ -266,7 +195,7 @@ export default function Widget({ embedded = false }) {
         setTypingNotice("");
         setMessages((prev) => {
           if (prev.find((m) => m.id === newMsg.id)) return prev;
-          return mergeThreadMessages(prev, [newMsg]);
+          return [...prev, newMsg];
         });
 
         if (newMsg?.sender_id !== session.userId) {
@@ -333,12 +262,35 @@ export default function Widget({ embedded = false }) {
           return;
         }
 
-        const nextSession = await initializeCustomerSession({
-          createIfMissing: false,
+        const response = await fetch(`${API_URL}/api/protected/customer/chat-session`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${viewerSession.token}`,
+          },
         });
-        if (isCancelled || !nextSession) {
+
+        if (response.status === 401) {
+          if (viewerSession.isAuthenticated) {
+            clearStoredToken();
+          }
+          setSession(null);
           return;
         }
+
+        if (!response.ok) {
+          return;
+        }
+
+        const data = await response.json();
+        if (isCancelled) {
+          return;
+        }
+
+        setSession({
+          token: viewerSession.token,
+          conversationId: data.conversation_id,
+          userId: viewerSession.userId,
+        });
       } catch (error) {
         console.error("Failed to initialize customer chat session", error);
       }
@@ -349,7 +301,7 @@ export default function Widget({ embedded = false }) {
     return () => {
       isCancelled = true;
     };
-  }, [activeTab, initializeCustomerSession, isOpen, viewerSession.isAuthenticated, viewerSession.role]);
+  }, [activeTab, isOpen, viewerSession.isAuthenticated, viewerSession.role, viewerSession.token, viewerSession.userId]);
 
   useEffect(() => {
     if (!isOpen || articles.length > 0) return;
@@ -413,25 +365,13 @@ export default function Widget({ embedded = false }) {
       payload.attachment_type = uploadedFile.type;
     }
 
-    let activeSession = session;
-    if (!activeSession.conversationId) {
-      const createdSession = await initializeCustomerSession({
-        createIfMissing: true,
-      });
-      if (!createdSession?.conversationId) {
-        setIsUploading(false);
-        return;
-      }
-      activeSession = createdSession;
-    }
-
     const res = await fetch(
-      `${API_URL}/api/protected/conversations/${activeSession.conversationId}/messages`,
+      `${API_URL}/api/protected/conversations/${session.conversationId}/messages`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${activeSession.token}`,
+          Authorization: `Bearer ${session.token}`,
         },
         body: JSON.stringify(payload),
       },
@@ -442,7 +382,7 @@ export default function Widget({ embedded = false }) {
       const newMsg = await res.json();
       setMessages((prev) => {
         if (prev.find((m) => m.id === newMsg.id)) return prev;
-        return mergeThreadMessages(prev, [newMsg]);
+        return [...prev, newMsg];
       });
       setInput("");
       setAttachment(null);
@@ -464,7 +404,7 @@ export default function Widget({ embedded = false }) {
     const value = e.target.value;
     setInput(value);
 
-    if (!session?.conversationId) {
+    if (!session) {
       return;
     }
 
@@ -617,25 +557,18 @@ export default function Widget({ embedded = false }) {
           </div>
 
           {activeTab === "help" ? (
-            <div className="flex flex-1 flex-col" style={widgetMutedSurfaceStyle}>
-              <div
-                className="border-b p-3"
-                style={{
-                  ...widgetCardStyle,
-                  borderColor: "var(--app-border)",
-                }}
-              >
+            <div className={`flex flex-1 flex-col ${mutedSurface}`}>
+              <div className={`border-b p-3 ${softPanelSurface}`}>
                 <input
                   type="text"
                   placeholder="Search help articles..."
-                  className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
+                  className={`w-full rounded-xl border px-3 py-2 text-sm outline-none ${inputSurface}`}
                   value={articleSearch}
                   onChange={(e) => setArticleSearch(e.target.value)}
                   style={{
-                    ...widgetInputStyle,
                     borderColor: selectedArticle
                       ? palette.accentBorder
-                      : widgetInputStyle.borderColor,
+                      : undefined,
                   }}
                 />
               </div>
@@ -649,10 +582,7 @@ export default function Widget({ embedded = false }) {
                   >
                     Back to articles
                   </button>
-                  <div
-                    className="rounded-2xl border p-4 shadow-sm"
-                    style={widgetCardStyle}
-                  >
+                  <div className={`rounded-2xl border p-4 shadow-sm ${cardSurface}`}>
                     <h4 className="text-lg font-semibold" style={{ color: "var(--app-text)" }}>
                       {selectedArticle.title}
                     </h4>
@@ -712,11 +642,8 @@ export default function Widget({ embedded = false }) {
                         key={article.id}
                         type="button"
                         onClick={() => openArticle(article.id)}
-                        className="w-full rounded-2xl border p-4 text-left shadow-sm transition hover:shadow-md"
-                        style={{
-                          ...widgetCardStyle,
-                          borderColor: palette.accentBorder,
-                        }}
+                        className={`w-full rounded-2xl border p-4 text-left shadow-sm transition hover:shadow-md ${cardSurface}`}
+                        style={{ borderColor: palette.accentBorder }}
                       >
                         <div className="mb-2 flex flex-wrap gap-2">
                           <span
@@ -751,7 +678,7 @@ export default function Widget({ embedded = false }) {
               )}
             </div>
           ) : !session ? (
-            <div className="flex flex-1 flex-col justify-center p-6" style={widgetMutedSurfaceStyle}>
+            <div className={`flex flex-1 flex-col justify-center p-6 ${mutedSurface}`}>
               <div className="app-detail-card rounded-3xl p-5 text-center">
                 <p className="text-sm font-semibold" style={{ color: "var(--app-text)" }}>
                   {viewerSession.isAuthenticated && viewerSession.role !== "customer"
@@ -807,7 +734,7 @@ export default function Widget({ embedded = false }) {
             </div>
           ) : (
             <>
-              <div className="flex-1 space-y-4 overflow-y-auto p-4" style={widgetMutedSurfaceStyle}>
+              <div className={`flex-1 space-y-4 overflow-y-auto p-4 ${mutedSurface}`}>
                 {messages.length === 0 && (
                   <div className="flex flex-col items-start">
                     <span className="app-message-sender-ai mb-1 inline-flex items-center gap-2 text-[11px] font-medium">
@@ -876,11 +803,7 @@ export default function Widget({ embedded = false }) {
                                   href={`${API_URL}${msg.attachment_url}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold"
-                                  style={{
-                                    background: "var(--app-card-muted)",
-                                    color: "var(--app-text)",
-                                  }}
+                                  className="inline-flex items-center gap-2 rounded-lg bg-black/10 px-3 py-2 text-xs font-semibold hover:bg-black/20"
                                 >
                                   📎 {msg.attachment_name}
                                 </a>
@@ -919,13 +842,7 @@ export default function Widget({ embedded = false }) {
                 )}
                 <div ref={messagesEndRef} />
               </div>
-              <div
-                className="flex flex-col border-t p-3"
-                style={{
-                  ...widgetCardStyle,
-                  borderColor: "var(--app-border)",
-                }}
-              >
+              <div className={`flex flex-col border-t p-3 ${softPanelSurface}`}>
                 {attachment && (
                   <div
                     className="mb-2 flex items-center justify-between rounded-xl px-3 py-1.5 text-xs"
@@ -987,11 +904,10 @@ export default function Widget({ embedded = false }) {
                   <input
                     type="text"
                     placeholder="Type a message..."
-                    className="flex-1 rounded-full border px-4 py-2 text-sm outline-none"
+                    className={`flex-1 rounded-full border px-4 py-2 text-sm outline-none ${inputSurface} ${isDark ? "focus:bg-slate-900" : "focus:bg-white"}`}
                     value={input}
                     onChange={handleInputChange}
                     disabled={isUploading}
-                    style={widgetInputStyle}
                   />
                   <button
                     type="submit"
@@ -1012,18 +928,8 @@ export default function Widget({ embedded = false }) {
         <button
           onClick={() => setIsOpen(!isOpen)}
           aria-label={isOpen ? "Close support chat" : "Open support chat"}
-          className="flex h-14 w-14 items-center justify-center rounded-full border shadow-lg transition-transform hover:scale-105"
-          style={
-            isOpen
-              ? {
-                  backgroundColor: "var(--app-card)",
-                  borderColor: "var(--app-border)",
-                }
-              : {
-                  backgroundColor: palette.accent,
-                  borderColor: palette.accent,
-                }
-          }
+          className="flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105"
+          style={{ backgroundColor: isOpen ? (isDark ? "#111827" : "#1F2937") : palette.accent }}
         >
           <svg
             className="h-6 w-6 text-white"

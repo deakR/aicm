@@ -70,26 +70,12 @@ func (h *WidgetHandler) InitWidget(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var conversationID string
-	err = h.DB.Pool.QueryRow(
-		ctx,
-		`SELECT id
-		 FROM conversations
-		 WHERE customer_id = $1
-		   AND source = 'web'
-		   AND merged_into_id IS NULL
-		   AND status IN ('open', 'pending', 'snoozed')
-		 ORDER BY updated_at DESC
-		 LIMIT 1`,
-		userID,
-	).Scan(&conversationID)
+	err = h.DB.Pool.QueryRow(ctx,
+		"INSERT INTO conversations (customer_id, source, subject) VALUES ($1, 'web', 'Widget Chat') RETURNING id",
+		userID).Scan(&conversationID)
 	if err != nil {
-		err = h.DB.Pool.QueryRow(ctx,
-			"INSERT INTO conversations (customer_id, source, subject) VALUES ($1, 'web', 'Widget Chat') RETURNING id",
-			userID).Scan(&conversationID)
-		if err != nil {
-			http.Error(w, "Failed to create conversation", http.StatusInternalServerError)
-			return
-		}
+		http.Error(w, "Failed to create conversation", http.StatusInternalServerError)
+		return
 	}
 
 	_ = json.NewEncoder(w).Encode(WidgetInitResponse{

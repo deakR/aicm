@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import ThemeToggle from "../components/ThemeToggle";
 import { buildBrandPalette } from "../branding";
 import {
@@ -14,34 +14,47 @@ import useBranding from "../context/useBranding";
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8900";
 
 const MODE_META = {
-  admin: {
-    title: "Admin sign in",
-    subtitle: "Manage users, analytics, AI settings, and operations.",
-    loginEndpoint: `${API_URL}/api/auth/admin/login`,
-    loginLabel: "Sign In as Admin",
-  },
-  agent: {
-    title: "Agent sign in",
-    subtitle: "Access the shared inbox, tickets, and day-to-day support tools.",
-    loginEndpoint: `${API_URL}/api/auth/agent/login`,
-    loginLabel: "Sign In as Agent",
-  },
   customer: {
-    title: "Customer sign in",
-    subtitle: "Track conversations, tickets, and continue support chats.",
+    title: "Sign in to track your support requests",
+    subtitle: "Track conversations, tickets, and continue support chats.",      
     loginEndpoint: `${API_URL}/api/auth/customer/login`,
     loginLabel: "Sign In",
+    registerEndpoint: `${API_URL}/api/auth/customer/register`,
+    registerLabel: "Create Account",
   },
   workspace: {
     title: "Workspace sign in",
-    subtitle: "Choose the right workspace account for your team role.",
-    loginEndpoint: `${API_URL}/api/auth/login`,
-    loginLabel: "Sign In to Workspace",
+    subtitle: "Access the shared inbox, tickets, and administration tools.",
+    loginEndpoint: `${API_URL}/api/auth/workspace/login`,
+    loginLabel: "Sign In",
   },
 };
 
+const WORKSPACE_ROLES = new Set(["admin", "agent"]);
+
+function safeParseJson(raw) {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function isRoleAllowedForMode(role, mode) {
+  if (mode === "workspace") {
+    return WORKSPACE_ROLES.has(role);
+  }
+
+  return role === "customer";
+}
+
 export default function Login({ mode = "workspace", variant = "login" }) {
-  const isRegisterMode = variant === "register";
+  const [internalVariant, setInternalVariant] = useState(variant);
+  const isRegisterMode = internalVariant === "register";
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
@@ -51,9 +64,24 @@ export default function Login({ mode = "workspace", variant = "login" }) {
   const { branding } = useBranding();
   const navigate = useNavigate();
   const palette = buildBrandPalette(branding.accent_color);
+  const isWorkspaceMode = mode === "workspace";
   const config = useMemo(() => MODE_META[mode] || MODE_META.workspace, [mode]);
-  const isCustomerMode = mode === "customer";
-  const isWorkspaceMode = mode === "workspace" || mode === "admin" || mode === "agent";
+
+  useEffect(() => {
+    setInternalVariant(variant);
+  }, [variant, mode]);
+
+  const readResponsePayload = async (response) => {
+    const raw = await response.text();
+    return {
+      raw,
+      json: safeParseJson(raw),
+    };
+  };
+
+  const roleMismatchMessage = isWorkspaceMode
+    ? "This account is not allowed in workspace sign in. Use an admin or agent account."
+    : "This account is not a customer account. Please use workspace sign in.";
 
   const performLogin = async (loginEmail, loginPassword) => {
     try {
@@ -63,26 +91,25 @@ export default function Login({ mode = "workspace", variant = "login" }) {
         body: JSON.stringify({ email: loginEmail, password: loginPassword }),
       });
 
-      const raw = await response.text();
-      let data = null;
-      if (raw) {
-        try {
-          data = JSON.parse(raw);
-        } catch {
-          data = null;
-        }
-      }
+      const payload = await readResponsePayload(response);
+      const errorMessage = payload.json?.message || payload.raw;
 
       if (!response.ok) {
-        setError(data?.message || raw || "Invalid credentials");
+        setError(errorMessage || "Invalid credentials");
         return false;
       }
 
-      const token = data?.token || "";
+      const token = payload.json?.token || "";
       const session = decodeAuthToken(token);
       if (!session?.role) {
         clearStoredToken();
         setError("Login succeeded, but the session could not be verified.");
+        return false;
+      }
+
+      if (!isRoleAllowedForMode(session.role, mode)) {
+        clearStoredToken();
+        setError(roleMismatchMessage);
         return false;
       }
 
@@ -108,8 +135,15 @@ export default function Login({ mode = "workspace", variant = "login" }) {
     event.preventDefault();
     setError("");
 
+    const normalizedEmail = email.trim().toLowerCase();
+    const trimmedName = name.trim();
+    if (!normalizedEmail) {
+      setError("Email is required.");
+      return;
+    }
+
     if (isRegisterMode) {
-      if (!name.trim()) {
+      if (!trimmedName) {
         setError("Name is required.");
         return;
       }
@@ -123,24 +157,24 @@ export default function Login({ mode = "workspace", variant = "login" }) {
 
     if (isRegisterMode) {
       try {
-        const response = await fetch(`${API_URL}/api/auth/customer/register`, {
+        const response = await fetch(config.registerEndpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            name: name.trim(),
-            email,
+            name: trimmedName,
+            email: normalizedEmail,
             password,
           }),
         });
 
-        const raw = await response.text();
+        const payload = await readResponsePayload(response);
         if (!response.ok) {
-          setError(raw || "Failed to create your account.");
+          setError(payload.json?.message || payload.raw || "Failed to create your account.");
           setIsSubmitting(false);
           return;
         }
 
-        const loggedIn = await performLogin(email, password);
+        const loggedIn = await performLogin(normalizedEmail, password);
         if (!loggedIn) {
           setError("Account created, but automatic sign-in failed. Please sign in manually.");
         }
@@ -152,7 +186,7 @@ export default function Login({ mode = "workspace", variant = "login" }) {
       return;
     }
 
-    await performLogin(email, password);
+    await performLogin(normalizedEmail, password);
     setIsSubmitting(false);
   };
 
@@ -162,168 +196,229 @@ export default function Login({ mode = "workspace", variant = "login" }) {
         <ThemeToggle />
       </div>
 
-      <div className="relative w-full max-w-md">
-        <div className="app-card rounded-3xl p-8 shadow-2xl md:p-10">
-          <div className="mb-8 text-center">
-            <div className="mb-4 inline-flex items-center justify-center">
-              <div
-                className="flex h-14 w-14 items-center justify-center rounded-2xl text-2xl font-bold text-white shadow-lg"
-                style={{
-                  background: `linear-gradient(135deg, ${palette.accentDark}, ${palette.accent})`,
-                }}
-              >
-                {branding.brand_name.charAt(0)}
-              </div>
-            </div>
-            <h1
-              className="text-2xl font-bold tracking-tight"
-              style={{ color: "var(--app-text)" }}
-            >
-              {isRegisterMode ? "Create Customer Account" : config.title}
-            </h1>
-            <p className="mt-2 text-sm" style={{ color: "var(--app-text-muted)" }}>
-              {isRegisterMode
-                ? "Create a customer account before starting support chat."
-                : config.subtitle}
-            </p>
+      {isWorkspaceMode ? (
+        <div className="flex w-full max-w-6xl overflow-hidden rounded-3xl bg-white shadow-2xl" style={{ minHeight: '80vh' }}>
+          <div className="hidden md:flex w-1/2 flex-col items-center justify-center p-12 text-center text-white" style={{ background: `linear-gradient(135deg, ${palette.accentDark}, ${palette.accent})` }}>
+            <h1 className="text-4xl font-bold mb-4">AICM Workspace</h1>
+            <p className="text-lg opacity-90">Deliver exceptional support faster.</p>
           </div>
-
-          {error && (
-            <div
-              className="mb-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
-              role="alert"
-            >
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {isRegisterMode && (
-              <div>
-                <label htmlFor="name-input" className="mb-2 block text-sm font-medium" style={{ color: "var(--app-text)" }}>
-                  Name
-                </label>
-                <input
-                  id="name-input"
-                  type="text"
-                  required
-                  placeholder="John Doe"
-                  className="app-field-control w-full"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                />
+          <div className="flex w-full md:w-1/2 flex-col justify-center p-8 lg:p-16 bg-white">
+            <div className="mx-auto w-full max-w-sm">
+              <div className="mb-8 text-center">
+                <h1 className="text-3xl font-bold tracking-tight text-gray-900">Sign in</h1>
+                <p className="mt-2 text-sm text-gray-500">Sign in to your team workspace</p>
               </div>
-            )}
 
-            <div>
-              <label htmlFor="email-input" className="mb-2 block text-sm font-medium" style={{ color: "var(--app-text)" }}>
-                Email
-              </label>
-              <input
-                id="email-input"
-                type="email"
-                required
-                autoComplete="email"
-                placeholder="you@example.com"
-                className="app-field-control w-full"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-              />
-            </div>
+              {error && (
+                <div className="mb-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  {error}
+                </div>
+              )}
 
-            <div>
-              <label htmlFor="password-input" className="mb-2 block text-sm font-medium" style={{ color: "var(--app-text)" }}>
-                Password
-              </label>
-              <input
-                id="password-input"
-                type="password"
-                required
-                autoComplete={isRegisterMode ? "new-password" : "current-password"}
-                placeholder="********"
-                className="app-field-control w-full"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-              />
-            </div>
-
-            {isRegisterMode && (
-              <div>
-                <label htmlFor="confirm-password-input" className="mb-2 block text-sm font-medium" style={{ color: "var(--app-text)" }}>
-                  Confirm Password
-                </label>
-                <input
-                  id="confirm-password-input"
-                  type="password"
-                  required
-                  autoComplete="new-password"
-                  placeholder="********"
-                  className="app-field-control w-full"
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                />
+              <div className="mb-6 space-y-3">
+                <button type="button" disabled className="flex w-full items-center justify-center gap-3 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 opacity-60 cursor-not-allowed">
+                  <svg className="h-5 w-5" viewBox="0 0 24 24">
+                    <path
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                      fill="#4285F4"
+                    />
+                    <path
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      fill="#34A853"
+                    />
+                    <path
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                      fill="#FBBC05"
+                    />
+                    <path
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                      fill="#EA4335"
+                    />
+                  </svg>
+                  Continue with Google
+                </button>
+                <button type="button" disabled className="flex w-full items-center justify-center gap-3 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 opacity-60 cursor-not-allowed">
+                  <svg className="h-5 w-5" fill="#00a4ef" viewBox="0 0 21 21">
+                    <path d="M0 0h10v10H0zm11 0h10v10H11zM0 11h10v10H0zm11 0h10v10H11z" />
+                  </svg>
+                  Continue with Microsoft
+                </button>
               </div>
-            )}
 
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="app-primary-button w-full py-3 text-base font-bold disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isSubmitting
-                ? isRegisterMode
-                  ? "Creating Account..."
-                  : "Signing In..."
-                : isRegisterMode
-                  ? "Create Account"
-                  : config.loginLabel}
-            </button>
-          </form>
-
-          <div className="mt-8 space-y-4">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t" style={{ borderColor: "var(--app-border)" }} />
+              <div className="relative my-6">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-200"></div>
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="bg-white px-4 text-gray-500">Or continue with email</span>
+                </div>
               </div>
-              <div className="relative flex justify-center text-xs">
-                <span className="px-2" style={{ background: "var(--app-card)", color: "var(--app-text-muted)" }}>
-                  Account routes
-                </span>
-              </div>
-            </div>
 
-            <div className="flex flex-wrap justify-center gap-4 text-sm">
-              <Link to="/workspace/login" className="font-medium transition-colors" style={{ color: isWorkspaceMode && !isCustomerMode && !isRegisterMode ? palette.accent : "var(--app-text-muted)" }}>
-                Workspace
-              </Link>
-              <span style={{ color: "var(--app-border)" }}>•</span>
-              <Link to="/login" className="font-medium transition-colors" style={{ color: isCustomerMode && !isRegisterMode ? palette.accent : "var(--app-text-muted)" }}>
-                Customer Sign In
-              </Link>
-              <span style={{ color: "var(--app-border)" }}>•</span>
-              <Link to="/register" className="font-medium transition-colors" style={{ color: isRegisterMode ? palette.accent : "var(--app-text-muted)" }}>
-                Customer Register
-              </Link>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label htmlFor="workspace-email" className="mb-2 block text-sm font-medium text-gray-900">Email</label>
+                  <input
+                    id="workspace-email"
+                    type="email"
+                    required
+                    autoComplete="email"
+                    placeholder="you@example.com"
+                    className="app-field-control w-full bg-white text-gray-900 border border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="workspace-password" className="mb-2 block text-sm font-medium text-gray-900">Password</label>
+                  <input
+                    id="workspace-password"
+                    type="password"
+                    required
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                    className="app-field-control w-full bg-white text-gray-900 border border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="app-primary-button mt-4 w-full justify-center disabled:opacity-50"
+                  style={{ backgroundColor: palette.accent }}
+                >
+                  {isSubmitting ? 'Signing in...' : config.loginLabel}
+                </button>
+              </form>
             </div>
-          </div>
-
-          <div
-            className="mt-6 rounded-xl px-4 py-3 text-center text-xs leading-relaxed"
-            style={{
-              backgroundColor: "var(--app-card-muted)",
-              color: "var(--app-text-soft)",
-            }}
-          >
-            {isRegisterMode
-              ? "Customer accounts can use the public chat, sign in to the dashboard, and track tickets."
-              : isCustomerMode
-                ? "Customers can sign in here, then use the help center or widget to start authenticated support chat."
-                : mode === "admin"
-                  ? "Admins can manage users, AI settings, workflows, analytics, and the shared support workspace."
-                  : "Agents use the shared inbox, tickets, knowledge hub, and workflow tools for support operations."}
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="relative w-full max-w-md">
+          <div className="app-card rounded-3xl p-8 border border-slate-200 bg-white shadow-sm md:p-10">
+            <div className="mb-8 text-center">
+              <div className="mb-4 inline-flex items-center justify-center">
+                <div
+                  className="flex h-14 w-14 items-center justify-center rounded-2xl text-2xl font-bold text-white shadow-lg"
+                  style={{ background: `linear-gradient(135deg, ${palette.accentDark}, ${palette.accent})` }}
+                >
+                  {branding.brand_name.charAt(0)}
+                </div>
+              </div>
+              <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+                {isRegisterMode ? config.registerLabel : config.title}
+              </h1>
+              <p className="mt-2 text-sm text-gray-500">
+                {isRegisterMode
+                  ? 'Create a customer account before starting support chat.'
+                  : config.subtitle}
+              </p>
+            </div>
+
+            <div className="mb-6 inline-flex w-full rounded-xl border border-slate-200 bg-slate-50 p-1">
+              <button
+                type="button"
+                onClick={() => setInternalVariant("login")}
+                className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                  !isRegisterMode ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+                }`}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                onClick={() => setInternalVariant("register")}
+                className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                  isRegisterMode ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+                }`}
+              >
+                Create Account
+              </button>
+            </div>
+
+            {error && (
+              <div className="mb-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {isRegisterMode && (
+                <div>
+                  <label htmlFor="customer-name" className="mb-2 block text-sm font-medium text-gray-900">Name</label>
+                  <input
+                    id="customer-name"
+                    type="text"
+                    required
+                    placeholder="Jane Doe"
+                    className="app-field-control w-full bg-white text-gray-900 border border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                </div>
+              )}
+              <div>
+                <label htmlFor="customer-email" className="mb-2 block text-sm font-medium text-gray-900">Email</label>
+                <input
+                  id="customer-email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  className="app-field-control w-full bg-white text-gray-900 border border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+              <div>
+                <label htmlFor="customer-password" className="mb-2 block text-sm font-medium text-gray-900">Password</label>
+                <input
+                  id="customer-password"
+                  type="password"
+                  required
+                  autoComplete={isRegisterMode ? 'new-password' : 'current-password'}
+                  placeholder="••••••••"
+                  className="app-field-control w-full bg-white text-gray-900 border border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+              {isRegisterMode && (
+                <div>
+                  <label htmlFor="customer-confirm-password" className="mb-2 block text-sm font-medium text-gray-900">Confirm Password</label>
+                  <input
+                    id="customer-confirm-password"
+                    type="password"
+                    required
+                    autoComplete="new-password"
+                    placeholder="••••••••"
+                    className="app-field-control w-full bg-white text-gray-900 border border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                  />
+                </div>
+              )}
+              
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="app-primary-button mt-4 w-full justify-center disabled:opacity-50"
+                style={{ backgroundColor: palette.accent }}
+              >
+                {isSubmitting
+                  ? 'Working...'
+                  : isRegisterMode
+                  ? config.registerLabel
+                  : config.loginLabel}
+              </button>
+            </form>
+
+            <div className="mt-6 text-center text-xs text-gray-500">
+              Customer authentication only. Staff should use workspace sign in.
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

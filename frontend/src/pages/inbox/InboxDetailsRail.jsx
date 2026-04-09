@@ -17,7 +17,10 @@ export default function InboxDetailsRail({
 }) {
   if (!activeChat) {
     return (
-      <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-gray-500">
+      <div
+        className="flex flex-1 items-center justify-center p-6 text-center text-sm"
+        style={{ color: "var(--app-text-muted)" }}
+      >
         Pick a conversation to see the customer profile and AI copilot details.
       </div>
     );
@@ -26,13 +29,22 @@ export default function InboxDetailsRail({
   return (
     <>
       <div className="app-page-header p-5">
-        <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 text-2xl font-bold text-blue-600">
+        <div
+          className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full text-2xl font-bold"
+          style={{
+            background: "color-mix(in srgb, var(--brand-accent-soft) 60%, var(--app-card))",
+            color: "var(--brand-accent-dark)",
+          }}
+        >
           {activeChat.customer_name.charAt(0)}
         </div>
-        <h3 className="text-center font-bold text-gray-900">
+        <h3 className="text-center font-bold" style={{ color: "var(--app-text)" }}>
           {activeChat.customer_name}
         </h3>
-        <p className="mb-4 text-center text-sm text-gray-500">
+        <p
+          className="mb-4 text-center text-sm"
+          style={{ color: "var(--app-text-muted)" }}
+        >
           Customer via {getSourceLabel(activeChat.source, "support")}
         </p>
       </div>
@@ -40,27 +52,27 @@ export default function InboxDetailsRail({
       <div className="flex-1 overflow-y-auto p-5">
         <div className="app-detail-card mb-6 p-4">
           <h3 className="app-section-kicker">Customer profile</h3>
-          <div className="mt-3 space-y-2 text-sm text-gray-600">
+          <div className="mt-3 space-y-2 text-sm" style={{ color: "var(--app-text-muted)" }}>
             <p>
-              <span className="font-semibold text-gray-900">Source:</span>{" "}
+              <span className="font-semibold" style={{ color: "var(--app-text)" }}>Source:</span>{" "}
               {getSourceLabel(activeChat.source, "support")}
             </p>
             {activeChat.subject && (
               <p>
-                <span className="font-semibold text-gray-900">Subject:</span>{" "}
+                <span className="font-semibold" style={{ color: "var(--app-text)" }}>Subject:</span>{" "}
                 {activeChat.subject}
               </p>
             )}
             <p>
-              <span className="font-semibold text-gray-900">Name:</span>{" "}
+              <span className="font-semibold" style={{ color: "var(--app-text)" }}>Name:</span>{" "}
               {activeCustomer?.name || activeChat.customer_name}
             </p>
             <p>
-              <span className="font-semibold text-gray-900">Email:</span>{" "}
+              <span className="font-semibold" style={{ color: "var(--app-text)" }}>Email:</span>{" "}
               {activeCustomer?.email || "Unknown"}
             </p>
             <p>
-              <span className="font-semibold text-gray-900">
+              <span className="font-semibold" style={{ color: "var(--app-text)" }}>
                 Conversations loaded:
               </span>{" "}
               {
@@ -70,12 +82,12 @@ export default function InboxDetailsRail({
               }
             </p>
             <p>
-              <span className="font-semibold text-gray-900">Assignee:</span>{" "}
+              <span className="font-semibold" style={{ color: "var(--app-text)" }}>Assignee:</span>{" "}
               {agents.find((agent) => agent.id === activeChat.assignee_id)
                 ?.name || "Unassigned"}
             </p>
             <p>
-              <span className="font-semibold text-gray-900">Tags:</span>{" "}
+              <span className="font-semibold" style={{ color: "var(--app-text)" }}>Tags:</span>{" "}
               {(activeChat.tags || []).length
                 ? activeChat.tags.join(", ")
                 : "None yet"}
@@ -86,8 +98,15 @@ export default function InboxDetailsRail({
                   <p className="app-section-kicker mb-1">Custom Attributes</p>
                   {Object.entries(activeCustomer.custom_attributes).map(
                     ([key, value]) => (
-                      <p key={key} className="text-sm text-gray-600">
-                        <span className="font-semibold text-gray-800 capitalize">
+                      <p
+                        key={key}
+                        className="text-sm"
+                        style={{ color: "var(--app-text-muted)" }}
+                      >
+                        <span
+                          className="font-semibold capitalize"
+                          style={{ color: "var(--app-text)" }}
+                        >
                           {key.replace(/_/g, " ")}:
                         </span>{" "}
                         {String(value)}
@@ -101,22 +120,22 @@ export default function InboxDetailsRail({
 
         <div className="app-detail-card mb-6 p-4">
           <h3 className="app-section-kicker">AI assessment</h3>
-          <div className="mt-3 space-y-2 text-sm text-gray-600">
+          <div className="mt-3 space-y-2 text-sm" style={{ color: "var(--app-text-muted)" }}>
             <p>
-              <span className="font-semibold text-gray-900">Confidence:</span>{" "}
+              <span className="font-semibold" style={{ color: "var(--app-text)" }}>Confidence:</span>{" "}
               <span className="capitalize">
                 {activeChat.ai_confidence_label || "unknown"}
               </span>{" "}
               ({((activeChat.ai_confidence_score || 0) * 100).toFixed(0)}%)
             </p>
             <p>
-              <span className="font-semibold text-gray-900">Outcome:</span>{" "}
+              <span className="font-semibold" style={{ color: "var(--app-text)" }}>Outcome:</span>{" "}
               <span className="capitalize">
                 {activeChat.ai_last_outcome || "unknown"}
               </span>
             </p>
             <p>
-              <span className="font-semibold text-gray-900">Source:</span>{" "}
+              <span className="font-semibold" style={{ color: "var(--app-text)" }}>Source:</span>{" "}
               {activeChat.ai_source_title || "No grounded article selected"}
             </p>
           </div>
@@ -124,51 +143,52 @@ export default function InboxDetailsRail({
 
         <div className="mb-4 flex items-center gap-2">
           <span className="app-chip app-chip-accent">AI</span>
-          <h3 className="text-lg font-bold text-gray-900">Copilot</h3>
+          <h3 className="text-lg font-bold" style={{ color: "var(--app-text)" }}>Copilot</h3>
         </div>
 
         {copilot.isLoading ? (
           <div className="space-y-3">
-            <div className="flex items-center gap-2 text-sm text-blue-700">
+            <div className="flex items-center gap-2 text-sm" style={{ color: "var(--brand-accent-dark)" }}>
               <span className="inline-flex gap-0.5">
                 <span
-                  className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-500"
+                  className="h-1.5 w-1.5 animate-bounce rounded-full"
+                  style={{ background: "var(--brand-accent)" }}
                   style={{ animationDelay: "0ms" }}
                 ></span>
                 <span
-                  className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-500"
-                  style={{ animationDelay: "150ms" }}
+                  className="h-1.5 w-1.5 animate-bounce rounded-full"
+                  style={{ background: "var(--brand-accent)", animationDelay: "150ms" }}
                 ></span>
                 <span
-                  className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-500"
-                  style={{ animationDelay: "300ms" }}
+                  className="h-1.5 w-1.5 animate-bounce rounded-full"
+                  style={{ background: "var(--brand-accent)", animationDelay: "300ms" }}
                 ></span>
               </span>
               <span className="font-medium">Copilot is thinking...</span>
             </div>
             <div className="flex animate-pulse space-x-4">
               <div className="flex-1 space-y-4 py-1">
-                <div className="h-4 w-3/4 rounded bg-blue-200"></div>
-                <div className="space-y-2">
-                  <div className="h-4 rounded bg-blue-200"></div>
-                  <div className="h-4 w-5/6 rounded bg-blue-200"></div>
+                  <div className="h-4 w-3/4 rounded" style={{ background: "var(--app-card-muted)" }}></div>
+                  <div className="space-y-2">
+                    <div className="h-4 rounded" style={{ background: "var(--app-card-muted)" }}></div>
+                    <div className="h-4 w-5/6 rounded" style={{ background: "var(--app-card-muted)" }}></div>
+                  </div>
                 </div>
               </div>
-            </div>
           </div>
         ) : (
           <div className="space-y-6">
             <div>
               <h4 className="app-section-kicker mb-2">Thread Summary</h4>
-              <div className="app-accent-card p-3 text-sm leading-relaxed text-gray-700">
-                {copilot.summary}
+                <div className="app-accent-card p-3 text-sm leading-relaxed" style={{ color: "var(--app-text-muted)" }}>
+                  {copilot.summary}
+                </div>
               </div>
-            </div>
 
             {copilot.suggested_reply && (
               <div>
                 <h4 className="app-section-kicker mb-2">Suggested Reply</h4>
-                <div className="app-accent-card mb-3 p-3 text-sm italic text-gray-800">
+                <div className="app-accent-card mb-3 p-3 text-sm italic" style={{ color: "var(--app-text)" }}>
                   "{copilot.suggested_reply}"
                 </div>
                 <div className="flex gap-2">
@@ -199,10 +219,10 @@ export default function InboxDetailsRail({
                     <div key={article.id} className="app-detail-card p-3">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="text-sm font-semibold text-gray-900">
+                          <p className="text-sm font-semibold" style={{ color: "var(--app-text)" }}>
                             {article.title}
                           </p>
-                          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-blue-600">
+                          <p className="mt-1 text-xs uppercase tracking-[0.18em]" style={{ color: "var(--brand-accent-dark)" }}>
                             Match {(article.match_score * 100).toFixed(0)}%
                           </p>
                         </div>
@@ -220,7 +240,7 @@ export default function InboxDetailsRail({
                           Use article
                         </button>
                       </div>
-                      <p className="mt-2 text-sm leading-relaxed text-gray-600">
+                      <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--app-text-muted)" }}>
                         {article.excerpt}
                       </p>
                     </div>
@@ -240,7 +260,7 @@ export default function InboxDetailsRail({
                   {copilot.prior_conversations.map((conversation) => (
                     <div key={conversation.id} className="app-detail-card p-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-semibold text-gray-900 capitalize">
+                        <span className="text-sm font-semibold capitalize" style={{ color: "var(--app-text)" }}>
                           {conversation.status}
                         </span>
                         <span
@@ -255,14 +275,14 @@ export default function InboxDetailsRail({
                         </span>
                       </div>
                       {conversation.subject && (
-                        <p className="mt-2 text-xs font-semibold text-gray-700">
+                        <p className="mt-2 text-xs font-semibold" style={{ color: "var(--app-text)" }}>
                           Subject: {conversation.subject}
                         </p>
                       )}
-                      <p className="mt-2 text-sm leading-relaxed text-gray-600">
+                      <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--app-text-muted)" }}>
                         {conversation.preview}
                       </p>
-                      <p className="mt-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
+                      <p className="mt-2 text-[11px] uppercase tracking-[0.14em]" style={{ color: "var(--app-text-soft)" }}>
                         Updated {new Date(conversation.updated_at).toLocaleString()}
                       </p>
                     </div>
@@ -289,8 +309,9 @@ export default function InboxDetailsRail({
               : "app-secondary-button square"
           }`}
         >
-          <svg
-            className="h-4 w-4 text-gray-500"
+            <svg
+            className="h-4 w-4"
+            style={{ color: "var(--app-text-muted)" }}
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"

@@ -1027,6 +1027,73 @@ body {
   color: #a7f3d0;
 }
 
+.app-composer-shell {
+  border-color: var(--app-border);
+  background: color-mix(in srgb, var(--app-card) 96%, transparent);
+}
+
+.app-composer-shell-internal {
+  border-color: color-mix(in srgb, #f59e0b 42%, var(--app-border));
+  background: color-mix(in srgb, #f59e0b 10%, var(--app-card));
+}
+
+[data-theme="dark"] .app-composer-shell-internal {
+  border-color: color-mix(in srgb, #fcd34d 54%, var(--app-border));
+  background: color-mix(in srgb, #f59e0b 18%, var(--app-card));
+}
+
+.app-composer-textarea {
+  color: var(--app-text);
+}
+
+.app-composer-textarea::placeholder {
+  color: var(--app-text-soft);
+}
+
+.app-composer-attachment {
+  border: 1px solid var(--app-border);
+  background: color-mix(in srgb, var(--app-card) 95%, transparent);
+  color: var(--app-text-muted);
+}
+
+.app-composer-icon-button {
+  color: var(--app-text-soft);
+}
+
+.app-composer-icon-button:hover {
+  background: color-mix(in srgb, var(--app-card-muted) 86%, transparent);
+  color: var(--app-text-muted);
+}
+
+.app-composer-toggle {
+  border-color: var(--app-border);
+  background: color-mix(in srgb, var(--app-card-muted) 82%, transparent);
+}
+
+.app-composer-toggle-option {
+  color: var(--app-text-soft);
+}
+
+.app-composer-toggle-option:hover {
+  color: var(--app-text-muted);
+}
+
+.app-composer-toggle-option.is-active {
+  background: color-mix(in srgb, var(--app-card) 95%, transparent);
+  color: var(--app-text);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.14);
+}
+
+.app-composer-toggle-note.is-active {
+  background: color-mix(in srgb, #fbbf24 24%, var(--app-card));
+  color: color-mix(in srgb, #78350f 72%, var(--app-text));
+}
+
+[data-theme="dark"] .app-composer-toggle-note.is-active {
+  background: color-mix(in srgb, #f59e0b 28%, var(--app-card));
+  color: #fde68a;
+}
+
 .app-note-card {
   border: 1px solid color-mix(in srgb, #10b981 30%, var(--app-border));
   background: color-mix(in srgb, #10b981 8%, var(--app-card));

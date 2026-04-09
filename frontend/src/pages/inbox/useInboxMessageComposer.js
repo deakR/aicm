@@ -51,11 +51,13 @@ export default function useInboxMessageComposer({
             uploadedFile = await uploadRes.json();
           } else {
             console.error("Failed to upload attachment");
+            alert("Failed to upload attachment. Please try again.");
             setIsUploading(false);
             return;
           }
         } catch (err) {
           console.error("Upload error", err);
+          alert("Upload error. Please try again.");
           setIsUploading(false);
           return;
         }
@@ -99,10 +101,29 @@ export default function useInboxMessageComposer({
             setAttachment(null);
             setIsInternal(false);
           }
+          return;
         }
+
+        if (res.status === 401) {
+          localStorage.removeItem("token");
+          window.location.assign("/workspace/login");
+          return;
+        }
+
+        let failureMessage = "Failed to send message. Please try again.";
+        try {
+          const errorText = await res.text();
+          if (errorText?.trim()) {
+            failureMessage = errorText.trim();
+          }
+        } catch {
+          // Use default failure message when response body cannot be read.
+        }
+        alert(failureMessage);
       } catch (err) {
         console.error("Failed to send message", err);
         setIsUploading(false);
+        alert("Failed to send message. Please check your connection and try again.");
       }
     },
     [

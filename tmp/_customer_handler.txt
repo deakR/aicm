@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"deakr/aicm/internal/database"
@@ -57,38 +56,9 @@ func (h *CustomerHandler) EnsureChatSession(w http.ResponseWriter, r *http.Reque
 
 	ctx := context.Background()
 	forceNew := r.URL.Query().Get("force_new") == "true"
-	createIfMissing := r.URL.Query().Get("create_if_missing") != "false"
-	preferredConversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
 
 	var conversationID string
 	if !forceNew {
-		if preferredConversationID != "" {
-			err := h.DB.Pool.QueryRow(
-				ctx,
-				`SELECT id
-				 FROM conversations
-				 WHERE id = $1
-				   AND customer_id = $2
-				   AND source = 'web'
-				   AND merged_into_id IS NULL
-				   AND status IN ('open', 'pending', 'snoozed')
-				 LIMIT 1`,
-				preferredConversationID,
-				userID,
-			).Scan(&conversationID)
-			if err == nil {
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(customerChatSessionResponse{
-					ConversationID: conversationID,
-				})
-				return
-			}
-			if !errors.Is(err, pgx.ErrNoRows) {
-				http.Error(w, "Failed to load customer conversation", http.StatusInternalServerError)
-				return
-			}
-		}
-
 		err := h.DB.Pool.QueryRow(
 			ctx,
 			`SELECT id
@@ -112,12 +82,6 @@ func (h *CustomerHandler) EnsureChatSession(w http.ResponseWriter, r *http.Reque
 			http.Error(w, "Failed to load customer conversation", http.StatusInternalServerError)
 			return
 		}
-	}
-
-	if !createIfMissing {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(customerChatSessionResponse{})
-		return
 	}
 
 	if err := h.DB.Pool.QueryRow(
@@ -185,7 +149,7 @@ func (h *CustomerHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 			c.agent_last_read_at,
 			COALESCE(
 				(
-					SELECT COALESCE(NULLIF(m.content, ''), m.attachment_name, 'Attachment sent')
+					SELECT m.content
 					FROM messages m
 					WHERE m.conversation_id = c.id AND m.is_internal = false
 					ORDER BY m.created_at DESC
@@ -206,7 +170,7 @@ func (h *CustomerHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 			) AS last_sender_name,
 			COALESCE(
 				(
-					SELECT CASE WHEN m.is_ai_generated THEN 'ai' ELSE u.role END
+					SELECT u.role
 					FROM messages m
 					JOIN users u ON u.id = m.sender_id
 					WHERE m.conversation_id = c.id AND m.is_internal = false

@@ -40,7 +40,7 @@ export function getSenderLabel(message, customerId) {
     return message.sender_name || 'You';
   }
   if (message.is_ai_generated) {
-    return 'AI Agent';
+    return message.sender_name || 'AI assistant';
   }
   return message.sender_name || 'Support Team';
 }

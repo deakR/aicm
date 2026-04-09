@@ -25,10 +25,18 @@ export default function InboxFiltersPanel({
     <div className="app-page-header p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+          <p
+            className="text-[11px] font-semibold uppercase tracking-[0.18em]"
+            style={{ color: "var(--app-text-soft)" }}
+          >
             Filters
           </p>
-          <p className="mt-1 text-xs text-gray-500">{filterSummary}</p>
+          <p
+            className="mt-1 text-xs"
+            style={{ color: "var(--app-text-muted)" }}
+          >
+            {filterSummary}
+          </p>
         </div>
         <button
           type="button"
@@ -46,13 +54,16 @@ export default function InboxFiltersPanel({
       {showFilters && (
         <div className="mt-4 grid gap-3">
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+            <label
+              className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em]"
+              style={{ color: "var(--app-text-soft)" }}
+            >
               Status
             </label>
             <select
               value={filters.status}
               onChange={(event) => updateFilter("status", event.target.value)}
-              className="app-input w-full rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="app-input w-full rounded-xl px-3 py-2 text-sm outline-none"
             >
               <option value="">All conversations</option>
               <option value="open">Open</option>
@@ -63,13 +74,16 @@ export default function InboxFiltersPanel({
           </div>
 
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+            <label
+              className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em]"
+              style={{ color: "var(--app-text-soft)" }}
+            >
               Assignee
             </label>
             <select
               value={filters.assignee_id}
               onChange={(event) => updateFilter("assignee_id", event.target.value)}
-              className="app-input w-full rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="app-input w-full rounded-xl px-3 py-2 text-sm outline-none"
             >
               <option value="">Everyone</option>
               {agents.map((agent) => (
@@ -81,13 +95,16 @@ export default function InboxFiltersPanel({
           </div>
 
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+            <label
+              className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em]"
+              style={{ color: "var(--app-text-soft)" }}
+            >
               Updated within
             </label>
             <select
               value={filters.days}
               onChange={(event) => updateFilter("days", event.target.value)}
-              className="app-input w-full rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="app-input w-full rounded-xl px-3 py-2 text-sm outline-none"
             >
               <option value="">Any time</option>
               <option value="1">Last 24 hours</option>
@@ -97,13 +114,16 @@ export default function InboxFiltersPanel({
           </div>
 
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+            <label
+              className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em]"
+              style={{ color: "var(--app-text-soft)" }}
+            >
               Source
             </label>
             <select
               value={filters.source}
               onChange={(event) => updateFilter("source", event.target.value)}
-              className="app-input w-full rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="app-input w-full rounded-xl px-3 py-2 text-sm outline-none"
             >
               <option value="">Any source</option>
               <option value="web">Web widget</option>
@@ -112,7 +132,10 @@ export default function InboxFiltersPanel({
           </div>
 
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+            <label
+              className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em]"
+              style={{ color: "var(--app-text-soft)" }}
+            >
               Tag
             </label>
             <input
@@ -120,7 +143,7 @@ export default function InboxFiltersPanel({
               value={filters.tag}
               onChange={(event) => updateFilter("tag", event.target.value)}
               placeholder="billing"
-              className="app-input w-full rounded-xl px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="app-input w-full rounded-xl px-3 py-2 text-sm outline-none"
             />
           </div>
 

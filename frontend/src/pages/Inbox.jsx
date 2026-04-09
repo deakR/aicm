@@ -298,7 +298,10 @@ export default function Inbox() {
               />
             </>
           ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center text-gray-500">
+            <div
+              className="flex flex-1 flex-col items-center justify-center gap-4 text-center"
+              style={{ color: "var(--app-text-muted)" }}
+            >
               <p>Select a conversation to start chatting.</p>
               {!showConversationRail && (
                 <button

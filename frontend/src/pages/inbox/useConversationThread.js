@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { mergeThreadMessages } from "../../utils/messageThread";
 
 export default function useConversationThread({
   apiUrl,
@@ -14,6 +15,8 @@ export default function useConversationThread({
 
   const socketRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const activeConversationIdRef = useRef("");
+  const fetchRequestSeqRef = useRef(0);
 
   const sendRealtimeEvent = useCallback((payload) => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -21,27 +24,31 @@ export default function useConversationThread({
     }
   }, []);
 
+  useLayoutEffect(() => {
+    const activeConversationID = activeChat?.id || "";
+    activeConversationIdRef.current = activeConversationID;
+    fetchRequestSeqRef.current += 1;
+    setMessages([]);
+    setTypingNotice("");
+    setIsThreadLoading(Boolean(activeConversationID));
+    setWsState(activeConversationID ? "connecting" : "disconnected");
+  }, [activeChat?.id]);
+
   useEffect(() => {
     const activeConversationID = activeChat?.id;
     const activeCustomerID = activeChat?.customer_id;
     const activeCustomerName = activeChat?.customer_name || "Customer";
     if (!activeConversationID) {
-      setWsState("disconnected");
       setIsThreadLoading(false);
-      setMessages([]);
       return;
     }
-
-    setMessages([]);
-    setTypingNotice("");
-    setIsThreadLoading(true);
-    setWsState("connecting");
 
     let socket = null;
     let reconnectTimer = null;
     let shouldReconnect = true;
 
     const fetchMessages = async () => {
+      const requestSeq = ++fetchRequestSeqRef.current;
       try {
         const res = await fetch(
           `${apiUrl}/api/protected/conversations/${activeConversationID}/messages`,
@@ -50,13 +57,25 @@ export default function useConversationThread({
           },
         );
         if (res.ok) {
-          setMessages(await res.json());
+          const fetchedMessages = await res.json();
+          if (
+            activeConversationIdRef.current !== activeConversationID ||
+            requestSeq !== fetchRequestSeqRef.current
+          ) {
+            return;
+          }
+          setMessages((prev) => mergeThreadMessages(prev, fetchedMessages));
           sendRealtimeEvent({ type: "read_receipt" });
         }
       } catch (err) {
         console.error("Failed to fetch messages", err);
       } finally {
-        setIsThreadLoading(false);
+        if (
+          activeConversationIdRef.current === activeConversationID &&
+          requestSeq === fetchRequestSeqRef.current
+        ) {
+          setIsThreadLoading(false);
+        }
       }
     };
 
@@ -68,6 +87,10 @@ export default function useConversationThread({
       socketRef.current = socket;
 
       socket.onopen = () => {
+        if (activeConversationIdRef.current !== activeConversationID) {
+          socket.close();
+          return;
+        }
         setWsState("connected");
         fetchMessages();
         sendRealtimeEvent({ type: "read_receipt" });
@@ -89,8 +112,13 @@ export default function useConversationThread({
                 : chat,
             ),
           );
-          if (incoming.payload.id === activeConversationID) {
-            setActiveChat((prev) => ({ ...prev, ...incoming.payload }));
+          if (
+            incoming.payload.id === activeConversationID &&
+            activeConversationIdRef.current === activeConversationID
+          ) {
+            setActiveChat((prev) =>
+              prev ? { ...prev, ...incoming.payload } : prev,
+            );
           }
           return;
         }
@@ -142,7 +170,7 @@ export default function useConversationThread({
             if (prev.find((message) => message.id === newMessage.id)) {
               return prev;
             }
-            return [...prev, newMessage];
+            return mergeThreadMessages(prev, [newMessage]);
           });
 
           setConversations((prev) =>
@@ -150,7 +178,10 @@ export default function useConversationThread({
               chat.id === newMessage.conversation_id
                 ? {
                     ...chat,
-                    preview: newMessage.content,
+                    preview:
+                      newMessage.content?.trim() ||
+                      newMessage.attachment_name ||
+                      "Attachment sent",
                     updated_at:
                       newMessage.created_at || new Date().toISOString(),
                   }
@@ -164,7 +195,10 @@ export default function useConversationThread({
       };
 
       socket.onclose = () => {
-        if (!shouldReconnect) {
+        if (
+          !shouldReconnect ||
+          activeConversationIdRef.current !== activeConversationID
+        ) {
           setWsState("disconnected");
           return;
         }
@@ -189,6 +223,9 @@ export default function useConversationThread({
       clearInterval(refreshTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (initialTypingTimeoutRef) clearTimeout(initialTypingTimeoutRef);
+      if (activeConversationIdRef.current === activeConversationID) {
+        activeConversationIdRef.current = "";
+      }
       socketRef.current = null;
       if (socket) socket.close();
     };

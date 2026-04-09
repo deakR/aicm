@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { clearStoredToken, getStoredToken } from "../auth";
 import ThemeToggle from "../components/ThemeToggle";
@@ -146,6 +146,18 @@ export default function CustomerDashboard() {
     }
   }, [loadOverview, token]);
 
+  useLayoutEffect(() => {
+    const nextConversationId = activeConversation?.id || "";
+    activeConversationIdRef.current = nextConversationId;
+    threadRequestSeqRef.current += 1;
+    lastRenderedMessageIdRef.current = "";
+    setMessages([]);
+    setTypingNotice("");
+    setReadState({ customer_last_read_at: "", agent_last_read_at: "" });
+    setWsState(nextConversationId ? "connecting" : "disconnected");
+    setIsThreadLoading(Boolean(nextConversationId));
+  }, [activeConversation?.id]);
+
   useEffect(() => {
     const viewport = threadViewportRef.current;
     if (!viewport) {
@@ -164,20 +176,8 @@ export default function CustomerDashboard() {
 
   useEffect(() => {
     if (!activeConversation) {
-      activeConversationIdRef.current = "";
-      setMessages([]);
-      setTypingNotice("");
-      setReadState({ customer_last_read_at: "", agent_last_read_at: "" });
-      lastRenderedMessageIdRef.current = "";
       return undefined;
     }
-
-    activeConversationIdRef.current = activeConversation.id;
-    threadRequestSeqRef.current += 1;
-    lastRenderedMessageIdRef.current = "";
-    setMessages([]);
-    setTypingNotice("");
-    setReadState({ customer_last_read_at: "", agent_last_read_at: "" });
 
     let socket = null;
     let reconnectTimer = null;
@@ -336,7 +336,7 @@ export default function CustomerDashboard() {
       if (socket) socket.close();
     };
   }, [
-    activeConversation,
+    activeConversation?.id,
     overview?.profile?.id,
     sendRealtimeEvent,
     token,
@@ -459,7 +459,7 @@ export default function CustomerDashboard() {
     setError("");
 
     try {
-      const res = await fetch(`${API_URL}/api/protected/customer/chat-session`, {
+      const res = await fetch(`${API_URL}/api/protected/customer/chat-session?force_new=true`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });

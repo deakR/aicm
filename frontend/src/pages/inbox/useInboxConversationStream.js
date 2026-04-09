@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { matchesConversationFilters } from "./inboxHelpers";
 
 export default function useInboxConversationStream({
@@ -9,6 +9,17 @@ export default function useInboxConversationStream({
   setConversations,
   setActiveChat,
 }) {
+  const filtersRef = useRef(filters);
+  const activeChatIdRef = useRef(activeChatId);
+
+  useEffect(() => {
+    filtersRef.current = filters;
+  }, [filters]);
+
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+
   useEffect(() => {
     if (!token) return undefined;
 
@@ -34,6 +45,7 @@ export default function useInboxConversationStream({
 
         if (incoming?.type === "conversation_update" && incoming?.payload?.id) {
           const updatedConversation = incoming.payload;
+          const currentFilters = filtersRef.current;
           setConversations((prev) => {
             const existing = prev.find(
               (chat) => chat.id === updatedConversation.id,
@@ -48,13 +60,13 @@ export default function useInboxConversationStream({
 
             next = next.filter((chat) =>
               chat.id === updatedConversation.id
-                ? matchesConversationFilters(chat, filters)
+                ? matchesConversationFilters(chat, currentFilters)
                 : true,
             );
 
             if (
               !existing &&
-              !matchesConversationFilters(updatedConversation, filters)
+              !matchesConversationFilters(updatedConversation, currentFilters)
             ) {
               next = prev;
             }
@@ -64,7 +76,7 @@ export default function useInboxConversationStream({
             );
           });
 
-          if (updatedConversation.id === activeChatId) {
+          if (updatedConversation.id === activeChatIdRef.current) {
             setActiveChat((prev) =>
               prev ? { ...prev, ...updatedConversation } : prev,
             );
@@ -91,5 +103,5 @@ export default function useInboxConversationStream({
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (socket) socket.close();
     };
-  }, [activeChatId, apiUrl, filters, setActiveChat, setConversations, token]);
+  }, [apiUrl, setActiveChat, setConversations, token]);
 }

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -739,48 +740,52 @@ func (h *ConversationHandler) triggerAIAgent(conversationID string, customerMess
 	customerRequestedHuman := customerRequestedHumanSupport(customerMessage)
 
 	systemInstruction := fmt.Sprintf(
-		"You are %s, a helpful customer support AI agent with a %s tone. Reply in 1 or 2 short sentences. Give the customer a direct answer first, then one practical next step only if needed. Keep the tone %s.",
+		"You are %s, a helpful customer support AI agent with a %s tone. Reply in 1 or 2 short sentences. Give the customer a direct answer first, then one practical next step only if needed. Keep the tone %s. Do not include greetings, salutations, self-introductions, or phrases like 'How can I help you today?'.",
 		settings.Name,
 		settings.Tone,
 		settings.Tone,
 	)
 
-	aiReply := "I'm sorry, I couldn't process that request right now."
+	aiReply := ""
 	aiOutcome := "unanswered"
-	if shouldAnswerFromKnowledge {
-		systemInstruction += fmt.Sprintf("A trusted help center article was retrieved via %s search with %s confidence. Use ONLY the article below to answer. Do not say you are transferring to a human if the article contains the answer.\n\nTitle: %s\nContent: %s", match.SourceMode, match.ConfidenceLabel, match.Title, match.Content)
-		reply, err := h.AI.GenerateSupportReply(ctx, systemInstruction, customerMessage)
-		if err != nil {
-			fmt.Printf("Error calling LLM provider with article context: %v\n", err)
+
+	if customerRequestedHuman {
+		aiReply = "I've noted your request. A human support agent will be with you shortly."
+		aiOutcome = "escalated"
+	} else if shouldAnswerFromKnowledge {
+		reply, err := h.AI.GenerateSupportReply(ctx, systemInstruction+fmt.Sprintf(
+			"\n\nA relevant help article was found. Use ONLY the following article to answer the customer's question directly. Do not mention transferring to a human if the article contains a clear answer.\n\nArticle title: %s\nArticle content: %s",
+			match.Title,
+			match.Content,
+		), customerMessage)
+		if err != nil || strings.TrimSpace(reply) == "" || containsEscalationLanguage(reply) {
 			aiReply = summarizeArticleForCustomer(match.Content)
 		} else {
 			aiReply = strings.TrimSpace(reply)
-			if aiReply == "" || containsEscalationLanguage(aiReply) {
-				// Keep the customer experience answer-first when retrieval was confident.
-				aiReply = summarizeArticleForCustomer(match.Content)
-			}
 		}
-		aiReply += fmt.Sprintf("\n\n*(Based on: %s)*", match.Title)
 		aiOutcome = "answered"
-	} else if strings.TrimSpace(match.Content) != "" {
-		aiReply = fallbackKnowledgeReply(match)
-		aiOutcome = "unanswered"
-	} else if customerRequestedHuman {
-		aiReply = "I can bring a human support agent into this conversation. I've shared the context so they can pick it up from here."
-		aiOutcome = "escalated"
 	} else {
-		aiReply = "I don't have enough verified information to give a final answer yet. Tell me a little more about the issue or share an order, invoice, or account detail, and I'll narrow it down before we bring in a human agent."
+		outOfScopeInstruction := fmt.Sprintf(
+			"You are %s, a customer support AI with a %s tone. The customer's message is outside this platform's knowledge base, which covers billing, refunds, shipping, account management, and password help. Acknowledge that you don't have specific information about their issue. Apologize briefly, tell them a human support agent will follow up, and ask them to share any relevant details that might help. Reply in 2 sentences maximum. Do not include greetings, salutations, self-introductions, or phrases like 'How can I help you today?'.",
+			settings.Name,
+			settings.Tone,
+		)
+		reply, err := h.AI.GenerateSupportReply(ctx, outOfScopeInstruction, customerMessage)
+		if err != nil || strings.TrimSpace(reply) == "" {
+			aiReply = "I don't have verified information about this in our help center. A human support agent will follow up with you shortly."
+		} else {
+			aiReply = strings.TrimSpace(reply)
+		}
 		aiOutcome = "unanswered"
 	}
 
-	var hasPreviousAIReply bool
-	_ = h.DB.Pool.QueryRow(
-		ctx,
-		`SELECT EXISTS(SELECT 1 FROM messages WHERE conversation_id = $1 AND is_ai_generated = true)`,
-		conversationID,
-	).Scan(&hasPreviousAIReply)
-	if !hasPreviousAIReply && strings.TrimSpace(settings.Greeting) != "" && !strings.Contains(strings.ToLower(aiReply), strings.ToLower(settings.Greeting)) {
-		aiReply = strings.TrimSpace(settings.Greeting) + " " + aiReply
+	aiReply = stripLeadingAIGreeting(aiReply, settings.Greeting, settings.Name)
+	if strings.TrimSpace(aiReply) == "" {
+		if shouldAnswerFromKnowledge && strings.TrimSpace(match.Content) != "" {
+			aiReply = summarizeArticleForCustomer(match.Content)
+		} else {
+			aiReply = "I don't have verified information about this in our help center. A human support agent will follow up with you shortly."
+		}
 	}
 
 	// ---------------------------------------------------------
@@ -908,6 +913,28 @@ func containsEscalationLanguage(text string) bool {
 	return false
 }
 
+func stripLeadingAIGreeting(text string, greeting string, name string) string {
+	cleaned := strings.TrimSpace(text)
+	if cleaned == "" {
+		return ""
+	}
+
+	if strings.TrimSpace(greeting) != "" {
+		greetingPrefix := regexp.MustCompile(`(?i)^` + regexp.QuoteMeta(strings.TrimSpace(greeting)) + `[:\s,.-]*`)
+		cleaned = strings.TrimSpace(greetingPrefix.ReplaceAllString(cleaned, ""))
+	}
+
+	if strings.TrimSpace(name) != "" {
+		introPrefix := regexp.MustCompile(`(?i)^hi[,!\s]+i['’]?m\s+` + regexp.QuoteMeta(strings.TrimSpace(name)) + `\.?(\s+how\s+can\s+i\s+help\s+you\s+today\??)?[:\s,.-]*`)
+		cleaned = strings.TrimSpace(introPrefix.ReplaceAllString(cleaned, ""))
+	}
+
+	genericHelpPrefix := regexp.MustCompile(`(?i)^how\s+can\s+i\s+help\s+you\s+today\??[:\s,.-]*`)
+	cleaned = strings.TrimSpace(genericHelpPrefix.ReplaceAllString(cleaned, ""))
+
+	return cleaned
+}
+
 func customerRequestedHumanSupport(text string) bool {
 	lowered := strings.ToLower(text)
 	phrases := []string{
@@ -927,18 +954,6 @@ func customerRequestedHumanSupport(text string) bool {
 		}
 	}
 	return false
-}
-
-func fallbackKnowledgeReply(match articleMatch) string {
-	if strings.TrimSpace(match.Content) == "" {
-		return "I couldn't find verified guidance for that yet. Share a little more detail and I'll keep narrowing it down."
-	}
-
-	summary := summarizeArticleForCustomer(match.Content)
-	if strings.TrimSpace(match.Title) == "" {
-		return "Here is the closest guidance I found: " + summary
-	}
-	return fmt.Sprintf("Here is the closest guidance I found: %s\n\n*(Closest match: %s)*", summary, match.Title)
 }
 
 func (h *ConversationHandler) updateConversationAIAssessment(ctx context.Context, conversationID string, match articleMatch, outcome string) {
@@ -1065,6 +1080,10 @@ func tokenizeSearchText(text string) []string {
 		"a": {}, "an": {}, "and": {}, "are": {}, "after": {}, "can": {}, "do": {}, "for": {}, "how": {},
 		"i": {}, "if": {}, "in": {}, "is": {}, "it": {}, "long": {}, "my": {}, "of": {}, "on": {}, "or": {},
 		"the": {}, "to": {}, "what": {}, "when": {}, "why": {}, "with": {}, "you": {}, "your": {},
+		"help": {}, "issue": {}, "having": {}, "kindly": {}, "please": {}, "need": {}, "want": {}, "got": {},
+		"seem": {}, "feel": {}, "know": {}, "just": {}, "also": {}, "get": {}, "has": {}, "had": {}, "not": {},
+		"but": {}, "this": {}, "that": {}, "they": {}, "them": {}, "was": {}, "will": {}, "been": {}, "have": {},
+		"did": {}, "does": {}, "should": {}, "next": {}, "information": {}, "detail": {}, "details": {},
 	}
 
 	tokens := make([]string, 0, len(parts))
@@ -1089,6 +1108,9 @@ func normalizeSearchToken(part string) string {
 		part = strings.TrimSuffix(part, "ed")
 	case strings.HasSuffix(part, "al") && len(part) > 5:
 		part = strings.TrimSuffix(part, "al")
+	}
+	if strings.HasSuffix(part, "e") && len(part) > 4 {
+		part = strings.TrimSuffix(part, "e")
 	}
 	if strings.HasSuffix(part, "s") && len(part) > 4 {
 		part = strings.TrimSuffix(part, "s")
@@ -1546,8 +1568,16 @@ func (h *ConversationHandler) MergeConversation(w http.ResponseWriter, r *http.R
 
 	ctx := context.Background()
 
+	// Start a database transaction
+	tx, err := h.DB.Pool.Begin(ctx)
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(ctx)
+
 	// Move all messages from source to target
-	_, err := h.DB.Pool.Exec(ctx,
+	_, err = tx.Exec(ctx,
 		"UPDATE messages SET conversation_id = $1 WHERE conversation_id = $2",
 		payload.TargetID, sourceID)
 	if err != nil {
@@ -1556,14 +1586,20 @@ func (h *ConversationHandler) MergeConversation(w http.ResponseWriter, r *http.R
 	}
 
 	// Mark source as resolved with merged_into_id if the column exists (graceful fallback if not)
-	_, _ = h.DB.Pool.Exec(ctx,
+	_, _ = tx.Exec(ctx,
 		"UPDATE conversations SET status = 'resolved', merged_into_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
 		payload.TargetID, sourceID)
 
 	// Update target conversation timestamp
-	_, _ = h.DB.Pool.Exec(ctx,
+	_, _ = tx.Exec(ctx,
 		"UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = $1",
 		payload.TargetID)
+
+	// Commit the transaction
+	if err := tx.Commit(ctx); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
 
 	// Return the updated target conversation
 	target, err := h.loadConversationSnapshot(ctx, payload.TargetID)

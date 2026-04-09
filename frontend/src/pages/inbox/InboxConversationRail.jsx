@@ -43,10 +43,16 @@ export default function InboxConversationRail({
       <div className="app-page-header p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-bold tracking-tight text-slate-800">
+            <h2
+              className="text-lg font-bold tracking-tight"
+              style={{ color: "var(--app-text)" }}
+            >
               Shared Inbox
             </h2>
-            <p className="mt-1 text-xs text-gray-500">
+            <p
+              className="mt-1 text-xs"
+              style={{ color: "var(--app-text-muted)" }}
+            >
               Realtime conversations with AI Copilot support.
             </p>
           </div>

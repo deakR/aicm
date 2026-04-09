@@ -1,7 +1,6 @@
 const TOKEN_KEY = 'token';
 const POST_LOGIN_PATH_KEY = 'aicm:post-login-path';
 const WIDGET_RESUME_KEY = 'aicm:resume-widget';
-const CUSTOMER_CONVERSATION_KEY_PREFIX = 'aicm:last-customer-conversation:';
 
 function decodeBase64Url(segment) {
   if (!segment) {
@@ -93,30 +92,4 @@ export function getDefaultRouteForRole(role) {
     default:
       return '/login';
   }
-}
-
-export function rememberLastCustomerConversation(userId, conversationId) {
-  if (!userId || !conversationId) {
-    return;
-  }
-  localStorage.setItem(
-    `${CUSTOMER_CONVERSATION_KEY_PREFIX}${userId}`,
-    conversationId,
-  );
-}
-
-export function getLastCustomerConversation(userId) {
-  if (!userId) {
-    return '';
-  }
-  return (
-    localStorage.getItem(`${CUSTOMER_CONVERSATION_KEY_PREFIX}${userId}`) || ''
-  );
-}
-
-export function clearLastCustomerConversation(userId) {
-  if (!userId) {
-    return;
-  }
-  localStorage.removeItem(`${CUSTOMER_CONVERSATION_KEY_PREFIX}${userId}`);
 }

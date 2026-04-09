@@ -28,6 +28,10 @@ func (h *AuthHandler) LoginAgent(w http.ResponseWriter, r *http.Request) {
 	h.loginWithAllowedRoles(w, r, "agent")
 }
 
+func (h *AuthHandler) LoginWorkspace(w http.ResponseWriter, r *http.Request) {
+	h.loginWithAllowedRoles(w, r, "admin", "agent")
+}
+
 func (h *AuthHandler) LoginCustomer(w http.ResponseWriter, r *http.Request) {
 	h.loginWithAllowedRoles(w, r, "customer")
 }

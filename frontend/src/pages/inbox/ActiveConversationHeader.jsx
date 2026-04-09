@@ -24,24 +24,55 @@ export default function ActiveConversationHeader({
   }
 
   return (
-    <div className="z-10 flex items-center justify-between border-b border-gray-200 p-4 shadow-sm">
-      <div>
-        <h2 className="text-lg font-bold text-gray-900">
-          {activeChat.customer_name}
-        </h2>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <span
-            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${getSourceBadgeClasses(activeChat.source)}`}
-          >
-            {getSourceLabel(activeChat.source, "support")}
-          </span>
-          {activeChat.subject && (
-            <span className="app-chip px-2.5 py-1 text-[11px] font-medium">
-              Subject: {activeChat.subject}
-            </span>
-          )}
+    <div
+      className="app-page-header z-10 border-b p-4"
+      style={{ borderColor: "var(--app-border)" }}
+    >
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2
+              className="truncate text-lg font-bold"
+              style={{ color: "var(--app-text)" }}
+            >
+              {activeChat.customer_name}
+            </h2>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${getSourceBadgeClasses(activeChat.source)}`}
+              >
+                {getSourceLabel(activeChat.source, "support")}
+              </span>
+              {activeChat.subject && (
+                <span className="app-chip px-2.5 py-1 text-[11px] font-medium">
+                  Subject: {activeChat.subject}
+                </span>
+              )}
+              <span
+                className={`app-status-pill rounded-full px-2 py-1 text-[11px] font-medium uppercase ${
+                  activeChat.ai_confidence_label === "high"
+                    ? "app-status-pill-open"
+                    : activeChat.ai_confidence_label === "medium"
+                      ? "app-status-pill-pending"
+                      : activeChat.ai_confidence_label === "low"
+                        ? "app-status-pill-danger"
+                        : "app-status-pill-default"
+                }`}
+              >
+                AI {activeChat.ai_confidence_label || "unknown"}
+              </span>
+            </div>
+          </div>
+          <p className="text-xs" style={{ color: "var(--app-text-muted)" }}>
+            {wsState === "connected"
+              ? "Realtime connected"
+              : wsState === "reconnecting" || wsState === "connecting"
+                ? "Realtime connecting"
+                : "Realtime offline"}
+          </p>
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={onToggleConversationRail}
@@ -75,27 +106,13 @@ export default function ActiveConversationHeader({
               </option>
             ))}
           </select>
-          <span
-            className={`app-status-pill rounded-full px-2 py-1 text-[11px] font-medium uppercase ${
-              activeChat.ai_confidence_label === "high"
-                ? "app-status-pill-open"
-                : activeChat.ai_confidence_label === "medium"
-                  ? "app-status-pill-pending"
-                  : activeChat.ai_confidence_label === "low"
-                    ? "app-status-pill-danger"
-                    : "app-status-pill-default"
-            }`}
-          >
-            AI {activeChat.ai_confidence_label || "unknown"}
-          </span>
-          <p className="text-xs text-gray-500">Realtime: {wsState}</p>
           <button
             type="button"
             onClick={onOpenMerge}
             className="app-secondary-button"
             title="Merge this conversation into another"
           >
-            Merge...
+            Merge
           </button>
           <button
             type="button"
@@ -105,19 +122,20 @@ export default function ActiveConversationHeader({
             {showDetailsRail ? "Hide details" : "Show details"}
           </button>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+
+        <div className="flex flex-wrap items-center gap-2 border-t pt-3" style={{ borderColor: "var(--app-border)" }}>
           {(activeChat.tags || []).map((tag) => (
-              <button
-                key={tag}
-                type="button"
-                onClick={() => onRemoveTag(tag)}
-                className="app-chip rounded-full px-3 py-1 text-xs font-medium lowercase transition"
-                title="Remove tag"
-              >
-                {tag} x
-              </button>
+            <button
+              key={tag}
+              type="button"
+              onClick={() => onRemoveTag(tag)}
+              className="app-chip rounded-full px-3 py-1 text-xs font-medium lowercase transition"
+              title="Remove tag"
+            >
+              {tag} x
+            </button>
           ))}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-1 min-w-[220px] items-center gap-2">
             <input
               type="text"
               value={newTag}
@@ -129,7 +147,8 @@ export default function ActiveConversationHeader({
                 }
               }}
               placeholder="Add tag"
-              className="app-input rounded-full px-3 py-1.5 text-xs outline-none focus:border-blue-400"
+              className="app-input min-w-0 flex-1 rounded-full px-3 py-1.5 text-xs outline-none"
+              style={{ borderColor: "var(--app-border)" }}
             />
             <button
               type="button"

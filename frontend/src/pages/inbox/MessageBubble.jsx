@@ -1,3 +1,5 @@
+import { getSenderLabel } from "../../utils/conversationDisplay";
+
 export default function MessageBubble({
   message,
   activeCustomerId,
@@ -6,7 +8,9 @@ export default function MessageBubble({
   customerLastReadAt,
 }) {
   const isAI = message.is_ai_generated;
-  const isCustomer = message.sender_id === activeCustomerId;
+  const isCustomer =
+    message.sender_id === activeCustomerId ||
+    message.sender_role === "customer";
   const isAgent = !isCustomer && !isAI;
 
   const wasSeenByCustomer =
@@ -21,14 +25,15 @@ export default function MessageBubble({
       className={`flex flex-col ${isCustomer || isAI ? "items-start" : "items-end"}`}
     >
       <span
-        className={`mb-1 ml-1 mr-1 inline-flex items-center gap-2 text-xs ${isAI ? "app-message-sender-ai" : isAgent ? "app-message-sender-support" : "text-gray-500"}`}
+        className={`mb-1 ml-1 mr-1 inline-flex items-center gap-2 text-xs ${isAI ? "app-message-sender-ai" : isAgent ? "app-message-sender-support" : ""}`}
+        style={isCustomer ? { color: "var(--app-text-soft)" } : undefined}
       >
         {(isAI || isAgent) && (
           <span
-            className={`inline-block h-2 w-2 rounded-full ${isAI ? "app-message-dot-ai" : isAgent ? "app-message-dot-support" : "bg-gray-400"}`}
+            className={`inline-block h-2 w-2 rounded-full ${isAI ? "app-message-dot-ai" : "app-message-dot-support"}`}
           ></span>
         )}
-        {message.sender_name}{" "}
+        {getSenderLabel(message, activeCustomerId)}
         {message.is_internal && (
           <span className="ml-1 font-bold text-amber-600">(Internal Note)</span>
         )}
@@ -41,9 +46,7 @@ export default function MessageBubble({
               ? "rounded-tl-none app-message-bubble-customer"
               : isAI
                 ? "rounded-tl-none app-message-bubble-ai"
-                : isAgent
-                  ? "rounded-tr-none app-message-bubble-agent"
-                  : "rounded-tl-none app-message-bubble-customer"
+                : "rounded-tr-none app-message-bubble-agent"
         }`}
       >
         {message.content}
@@ -68,13 +71,16 @@ export default function MessageBubble({
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 rounded-lg bg-black/5 px-3 py-2 text-xs font-semibold text-current hover:bg-black/10"
               >
-                📎 {message.attachment_name}
+                Attachment: {message.attachment_name}
               </a>
             )}
           </div>
         )}
       </div>
-      <span className="mt-1 ml-1 mr-1 text-[11px] text-gray-400">
+      <span
+        className="mt-1 ml-1 mr-1 text-[11px]"
+        style={{ color: "var(--app-text-soft)" }}
+      >
         {new Date(message.created_at).toLocaleString()}
       </span>
       {wasSeenByCustomer && (
