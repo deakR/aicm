@@ -39,7 +39,7 @@ export default function MessageBubble({
         )}
       </span>
       <div
-        className={`max-w-2xl break-words rounded-2xl p-3 text-sm shadow-sm ${
+        className={`max-w-2xl break-all rounded-2xl p-3 text-sm shadow-sm ${
           message.is_internal
             ? "app-message-bubble-internal"
             : isCustomer
@@ -48,6 +48,7 @@ export default function MessageBubble({
                 ? "rounded-tl-none app-message-bubble-ai"
                 : "rounded-tr-none app-message-bubble-agent"
         }`}
+        style={{ overflowWrap: "break-word" }}
       >
         {message.content}
         {message.attachment_url && (

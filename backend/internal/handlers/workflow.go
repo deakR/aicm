@@ -109,9 +109,14 @@ func (h *WorkflowHandler) ListWorkflows(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	limit, offset := parsePagination(r, 50, 200)
+
 	rows, err := h.DB.Pool.Query(context.Background(),
 		`SELECT id, name, trigger_type, trigger_condition, action_type, action_payload, is_active, created_at, conditions, condition_logic
-		 FROM workflows ORDER BY created_at DESC`)
+		 FROM workflows ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+		limit,
+		offset,
+	)
 	if err != nil {
 		http.Error(w, "Failed to fetch workflows", http.StatusInternalServerError)
 		return
@@ -138,6 +143,10 @@ func (h *WorkflowHandler) ListWorkflows(w http.ResponseWriter, r *http.Request) 
 			wf.ConditionLogic = "and"
 		}
 		workflows = append(workflows, wf)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "Failed to stream workflows", http.StatusInternalServerError)
+		return
 	}
 
 	if workflows == nil {
@@ -185,6 +194,10 @@ func (h *WorkflowHandler) ListWorkflowLogs(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		logs = append(logs, wfLog)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "Failed to stream workflow logs", http.StatusInternalServerError)
+		return
 	}
 
 	if logs == nil {
@@ -239,6 +252,7 @@ func (h *WorkflowHandler) evaluateWorkflows(ctx context.Context, conversationID 
 		`SELECT id, trigger_type, trigger_condition, action_type, action_payload, conditions, condition_logic
 		 FROM workflows WHERE is_active = true`)
 	if err != nil {
+		log.Printf("workflow evaluation query failed for conversation %s: %v", conversationID, err)
 		return
 	}
 	defer rows.Close()
@@ -281,9 +295,14 @@ func (h *WorkflowHandler) evaluateWorkflows(ctx context.Context, conversationID 
 
 		if matched {
 			fmt.Printf("Workflow Engine: Rule '%s' matched on conversation %s (event: %s)\n", id, conversationID, eventType)
-			h.executeAction(ctx, conversationID, aType, aPayload)
-			_, _ = h.DB.Pool.Exec(ctx, "INSERT INTO workflow_logs (workflow_id, conversation_id) VALUES ($1, $2)", id, conversationID)
+			if err := h.executeAction(ctx, conversationID, aType, aPayload); err != nil {
+				log.Printf("workflow action failed (workflow=%s conversation=%s action=%s): %v", id, conversationID, aType, err)
+			}
+			h.recordWorkflowExecution(ctx, id, conversationID)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("workflow evaluation stream failed for conversation %s: %v", conversationID, err)
 	}
 }
 
@@ -388,6 +407,7 @@ func (h *WorkflowHandler) runTimedWorkflows(ctx context.Context) {
 		`SELECT id, trigger_condition, action_type, action_payload FROM workflows
 		 WHERE is_active = true AND trigger_type = 'time_elapsed'`)
 	if err != nil {
+		log.Printf("timed workflow query failed: %v", err)
 		return
 	}
 	defer rows.Close()
@@ -395,6 +415,7 @@ func (h *WorkflowHandler) runTimedWorkflows(ctx context.Context) {
 	for rows.Next() {
 		var id, tCond, aType, aPayload string
 		if err := rows.Scan(&id, &tCond, &aType, &aPayload); err != nil {
+			log.Printf("failed scanning timed workflow row: %v", err)
 			continue
 		}
 
@@ -417,32 +438,46 @@ func (h *WorkflowHandler) runTimedWorkflows(ctx context.Context) {
 			LIMIT 20
 		`, hours, id)
 		if err != nil {
+			log.Printf("failed loading timed workflow conversations for workflow %s: %v", id, err)
 			continue
 		}
 
 		var convIDs []string
 		for convRows.Next() {
 			var cid string
-			if convRows.Scan(&cid) == nil {
-				convIDs = append(convIDs, cid)
+			if scanErr := convRows.Scan(&cid); scanErr != nil {
+				log.Printf("failed scanning timed workflow conversation row for workflow %s: %v", id, scanErr)
+				continue
 			}
+			convIDs = append(convIDs, cid)
+		}
+		if err := convRows.Err(); err != nil {
+			log.Printf("timed workflow conversation stream failed for workflow %s: %v", id, err)
 		}
 		convRows.Close()
 
 		for _, cid := range convIDs {
 			log.Printf("Time-elapsed workflow %s firing on conversation %s\n", id, cid)
-			h.executeAction(ctx, cid, aType, aPayload)
-			_, _ = h.DB.Pool.Exec(ctx, "INSERT INTO workflow_logs (workflow_id, conversation_id) VALUES ($1, $2)", id, cid)
+			if err := h.executeAction(ctx, cid, aType, aPayload); err != nil {
+				log.Printf("timed workflow action failed (workflow=%s conversation=%s action=%s): %v", id, cid, aType, err)
+			}
+			h.recordWorkflowExecution(ctx, id, cid)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("timed workflow stream failed: %v", err)
 	}
 }
 
 // executeAction runs the workflow action.
-func (h *WorkflowHandler) executeAction(ctx context.Context, conversationID string, actionType string, actionPayload string) {
+func (h *WorkflowHandler) executeAction(ctx context.Context, conversationID string, actionType string, actionPayload string) error {
 	switch actionType {
 	case "assign_agent":
-		_, _ = h.DB.Pool.Exec(ctx, "UPDATE conversations SET assignee_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", actionPayload, conversationID)
+		if _, err := h.DB.Pool.Exec(ctx, "UPDATE conversations SET assignee_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", actionPayload, conversationID); err != nil {
+			return fmt.Errorf("assign_agent failed: %w", err)
+		}
 		h.broadcastConversationUpdate(ctx, conversationID)
+		return nil
 
 	case "auto_reply":
 		var botID string
@@ -452,27 +487,32 @@ func (h *WorkflowHandler) executeAction(ctx context.Context, conversationID stri
 			ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
 			RETURNING id
 		`
-		if err := h.DB.Pool.QueryRow(ctx, query).Scan(&botID); err == nil {
-			var msg models.Message
-			err = h.DB.Pool.QueryRow(ctx,
-				"INSERT INTO messages (conversation_id, sender_id, content, is_ai_generated) VALUES ($1, $2, $3, false) RETURNING id, created_at",
-				conversationID, botID, actionPayload,
-			).Scan(&msg.ID, &msg.CreatedAt)
-			if err == nil {
-				msg.ConversationID = conversationID
-				msg.SenderID = botID
-				msg.SenderRole = "admin"
-				msg.Content = actionPayload
-				msg.SenderName = "Automation Bot"
-				ws.Broadcast(conversationID, msg)
-				h.broadcastConversationUpdate(ctx, conversationID)
-			}
+		if err := h.DB.Pool.QueryRow(ctx, query).Scan(&botID); err != nil {
+			return fmt.Errorf("auto_reply bot upsert failed: %w", err)
 		}
+
+		var msg models.Message
+		err := h.DB.Pool.QueryRow(ctx,
+			"INSERT INTO messages (conversation_id, sender_id, content, is_ai_generated) VALUES ($1, $2, $3, false) RETURNING id, created_at",
+			conversationID, botID, actionPayload,
+		).Scan(&msg.ID, &msg.CreatedAt)
+		if err != nil {
+			return fmt.Errorf("auto_reply message insert failed: %w", err)
+		}
+
+		msg.ConversationID = conversationID
+		msg.SenderID = botID
+		msg.SenderRole = "admin"
+		msg.Content = actionPayload
+		msg.SenderName = "Automation Bot"
+		ws.Broadcast(conversationID, msg)
+		h.broadcastConversationUpdate(ctx, conversationID)
+		return nil
 
 	case "add_tag":
 		tag := strings.ToLower(strings.TrimSpace(actionPayload))
 		if tag != "" {
-			_, _ = h.DB.Pool.Exec(ctx, `
+			if _, err := h.DB.Pool.Exec(ctx, `
 				UPDATE conversations
 				SET tags = ARRAY(
 					SELECT DISTINCT tag_value
@@ -481,31 +521,50 @@ func (h *WorkflowHandler) executeAction(ctx context.Context, conversationID stri
 				),
 				    updated_at = CURRENT_TIMESTAMP
 				WHERE id = $2
-			`, tag, conversationID)
+			`, tag, conversationID); err != nil {
+				return fmt.Errorf("add_tag failed: %w", err)
+			}
 			h.broadcastConversationUpdate(ctx, conversationID)
 		}
+		return nil
 
 	case "change_status":
 		allowed := map[string]bool{"open": true, "pending": true, "resolved": true, "snoozed": true}
 		if allowed[actionPayload] {
-			_, _ = h.DB.Pool.Exec(ctx, "UPDATE conversations SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", actionPayload, conversationID)
+			if _, err := h.DB.Pool.Exec(ctx, "UPDATE conversations SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", actionPayload, conversationID); err != nil {
+				return fmt.Errorf("change_status failed: %w", err)
+			}
 			h.broadcastConversationUpdate(ctx, conversationID)
+			return nil
 		}
+		return fmt.Errorf("change_status received invalid payload %q", actionPayload)
 
 	case "escalate_to_human":
 		// Unassign AI / mark as needing human (set assignee to nil) and add escalation tag
-		_, _ = h.DB.Pool.Exec(ctx, `
+		if _, err := h.DB.Pool.Exec(ctx, `
 			UPDATE conversations
 			SET tags = ARRAY(
 				SELECT DISTINCT tag_value
 				FROM UNNEST(COALESCE(tags, ARRAY[]::TEXT[]) || ARRAY['needs-human']::TEXT[]) AS tag_value
 				ORDER BY tag_value
 			),
+			    assignee_id = NULL,
 			    status = 'open',
 			    updated_at = CURRENT_TIMESTAMP
 			WHERE id = $1
-		`, conversationID)
+		`, conversationID); err != nil {
+			return fmt.Errorf("escalate_to_human failed: %w", err)
+		}
 		h.broadcastConversationUpdate(ctx, conversationID)
+		return nil
+	}
+
+	return fmt.Errorf("unsupported workflow action type %q", actionType)
+}
+
+func (h *WorkflowHandler) recordWorkflowExecution(ctx context.Context, workflowID string, conversationID string) {
+	if _, err := h.DB.Pool.Exec(ctx, "INSERT INTO workflow_logs (workflow_id, conversation_id) VALUES ($1, $2)", workflowID, conversationID); err != nil {
+		log.Printf("failed to record workflow execution (workflow=%s conversation=%s): %v", workflowID, conversationID, err)
 	}
 }
 

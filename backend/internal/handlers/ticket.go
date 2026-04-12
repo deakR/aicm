@@ -104,6 +104,8 @@ func (h *TicketHandler) ListTickets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	limit, offset := parsePagination(r, 50, 200)
+
 	priority := r.URL.Query().Get("priority")
 	status := r.URL.Query().Get("status")
 
@@ -141,7 +143,8 @@ func (h *TicketHandler) ListTickets(w http.ResponseWriter, r *http.Request) {
 		query += " WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
-	query += " ORDER BY t.created_at DESC"
+	query += fmt.Sprintf(" ORDER BY t.created_at DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	args = append(args, limit, offset)
 
 	rows, err := h.DB.Pool.Query(context.Background(), query, args...)
 	if err != nil {
@@ -174,6 +177,10 @@ func (h *TicketHandler) ListTickets(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		tickets = append(tickets, t)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "Failed to stream tickets", http.StatusInternalServerError)
+		return
 	}
 
 	if tickets == nil {

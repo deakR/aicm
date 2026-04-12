@@ -13,6 +13,7 @@ export default function ActiveConversationHeader({
   onToggleConversationRail,
   onToggleDetailsRail,
   onOpenMerge,
+  isConversationUpdating,
   onUpdateConversation,
   onAddTag,
   onRemoveTag,
@@ -69,6 +70,7 @@ export default function ActiveConversationHeader({
               : wsState === "reconnecting" || wsState === "connecting"
                 ? "Realtime connecting"
                 : "Realtime offline"}
+            {isConversationUpdating ? " | Saving..." : ""}
           </p>
         </div>
 
@@ -82,10 +84,12 @@ export default function ActiveConversationHeader({
           </button>
           <select
             value={activeChat.status}
+            disabled={isConversationUpdating}
+            aria-busy={isConversationUpdating}
             onChange={(event) =>
               onUpdateConversation({ status: event.target.value })
             }
-            className="app-input cursor-pointer rounded-full px-2 py-1 text-xs font-medium"
+            className="app-input cursor-pointer rounded-full px-2 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-60"
           >
             <option value="open">OPEN</option>
             <option value="pending">PENDING</option>
@@ -94,10 +98,12 @@ export default function ActiveConversationHeader({
           </select>
           <select
             value={activeChat.assignee_id || ""}
+            disabled={isConversationUpdating}
+            aria-busy={isConversationUpdating}
             onChange={(event) =>
               onUpdateConversation({ assignee_id: event.target.value || "" })
             }
-            className="app-input cursor-pointer rounded-full px-2 py-1 text-xs font-medium"
+            className="app-input cursor-pointer rounded-full px-2 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-60"
           >
             <option value="">Unassigned</option>
             {agents.map((agent) => (

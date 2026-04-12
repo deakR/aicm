@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"strconv"
 	"strings"
 
+	"deakr/aicm/internal/ai"
 	"deakr/aicm/internal/database"
 
 	"github.com/joho/godotenv"
@@ -140,7 +143,7 @@ func main() {
 	fmt.Printf("    customer -> %s / %s\n", users["customer_priya"].Email, users["customer_priya"].Password)
 	fmt.Printf("    customer -> %s / %s\n", users["customer_arjun"].Email, users["customer_arjun"].Password)
 	fmt.Printf("    customer -> %s / %s\n", users["customer_enterprise"].Email, users["customer_enterprise"].Password)
-	fmt.Println("Seeded content: 9 articles, 5 conversations, 3 tickets, 3 workflows, and workflow/ticket logs.")
+	fmt.Println("Seeded content: 14 articles, 5 conversations, 3 tickets, 3 workflows, and workflow/ticket logs.")
 }
 
 func resetTables(ctx context.Context, db *database.Service) error {
@@ -165,7 +168,7 @@ func seedAISettings(ctx context.Context, db *database.Service) error {
 	_, err := db.Pool.Exec(
 		ctx,
 		`INSERT INTO ai_settings (id, name, greeting, tone, brand_name, accent_color, updated_at)
-		 VALUES (1, 'AICM Concierge', 'Hi, I''m AICM Concierge. How can I help you today?', 'friendly', 'AICM Support', '#2563EB', CURRENT_TIMESTAMP)
+		 VALUES (1, 'AICM Concierge', 'Thanks for reaching out.', 'friendly', 'AICM Support', '#2563EB', CURRENT_TIMESTAMP)
 		 ON CONFLICT (id) DO UPDATE
 		 SET name = EXCLUDED.name,
 		     greeting = EXCLUDED.greeting,
@@ -720,86 +723,151 @@ func seedWorkflows(ctx context.Context, db *database.Service, users map[string]s
 }
 
 func seedArticles(ctx context.Context, db *database.Service) error {
+	var aiSvc *ai.Service
+	if strings.TrimSpace(os.Getenv("GROQ_API_KEY")) != "" {
+		aiSvc = ai.New()
+	}
+
 	articles := []seededArticle{
 		{
-			Title:      "Standard Shipping Timelines",
-			Collection: "Orders & Shipping",
-			Section:    "Shipping",
-			Content:    "Standard shipping usually takes 3 to 5 business days for domestic orders and 5 to 7 business days for international shipments.",
+			Title:      "How to Upload a New Prescription",
+			Collection: "Online Pharmacy Support",
+			Section:    "Prescription Management",
+			Content:    "You can upload a clear photo or PDF of a valid prescription from the checkout flow or your account prescriptions page. Our team verifies license details and medication instructions before dispensing.",
 			Status:     "published",
 		},
 		{
-			Title:      "Expedited Shipping",
-			Collection: "Orders & Shipping",
-			Section:    "Shipping",
-			Content:    "Expedited shipping usually arrives in 1 to 2 business days after dispatch. Overnight options may be available in select metro locations.",
+			Title:      "Prescription Verification Timelines",
+			Collection: "Online Pharmacy Support",
+			Section:    "Prescription Management",
+			Content:    "Most prescriptions are verified within 2 to 6 business hours during pharmacy operating times. If details are missing, we contact you before processing to avoid dispensing delays.",
 			Status:     "published",
 		},
 		{
-			Title:      "Tracking Your Order",
-			Collection: "Orders & Shipping",
-			Section:    "Tracking",
-			Content:    "Customers receive tracking links by email or SMS after dispatch. Courier systems can take up to 24 hours to show the first movement update.",
+			Title:      "Transfer a Prescription From Another Pharmacy",
+			Collection: "Online Pharmacy Support",
+			Section:    "Prescription Management",
+			Content:    "Start a transfer request by providing your current pharmacy name, phone number, and prescription label details. We coordinate directly with the previous pharmacy and notify you when transfer is complete.",
 			Status:     "published",
 		},
 		{
-			Title:      "Changing Delivery Address",
-			Collection: "Orders & Shipping",
-			Section:    "Order Management",
-			Content:    "Delivery addresses can be changed before an order reaches Packed status. After packing or shipping, address changes are no longer available from the dashboard.",
+			Title:      "Requesting a Refill Online",
+			Collection: "Online Pharmacy Support",
+			Section:    "Refills",
+			Content:    "Open your active prescription and select Refill to submit a new request. Refill orders are processed only when refill count and refill date rules from the prescriber are met.",
 			Status:     "published",
 		},
 		{
-			Title:      "Order Not Arrived - What To Do",
-			Collection: "Orders & Shipping",
-			Section:    "Delivery Issues",
-			Content:    "If an order has not arrived, confirm the expected delivery window first and wait 2 to 3 additional days for courier delays. If tracking remains unchanged after 48 hours, escalate to courier investigation.",
+			Title:      "Why a Refill Request Is Marked Too Early",
+			Collection: "Online Pharmacy Support",
+			Section:    "Refills",
+			Content:    "Refill requests can be delayed when insurance refill-too-soon limits or prescriber instructions block immediate dispensing. You can submit again on the next eligible date shown in your account.",
 			Status:     "published",
 		},
 		{
-			Title:      "Damaged or Incomplete Orders",
-			Collection: "Orders & Shipping",
-			Section:    "Delivery Issues",
-			Content:    "Ask customers to share clear photos of damaged packaging and items. Damage claims should be reported within 24 hours and can result in replacement or refund after review.",
+			Title:      "Refill Out of Stock - Next Steps",
+			Collection: "Online Pharmacy Support",
+			Section:    "Refills",
+			Content:    "If a refill is temporarily out of stock, we can place your request on hold, propose an equivalent pack size if permitted, or ship when inventory is replenished. We will message you with ETA updates.",
 			Status:     "published",
 		},
 		{
-			Title:      "Canceling an Order",
-			Collection: "Orders & Shipping",
-			Section:    "Order Management",
-			Content:    "Orders can be canceled from the dashboard only before they are packed. Packed or shipped orders can no longer be canceled directly.",
+			Title:      "Order Processing and Dispatch Windows",
+			Collection: "Online Pharmacy Support",
+			Section:    "Orders & Delivery",
+			Content:    "Verified medication orders are usually prepared the same day if approved before cutoff. Orders approved after cutoff are dispatched on the next business day.",
 			Status:     "published",
 		},
 		{
-			Title:      "Return and Refund Process",
-			Collection: "Orders & Shipping",
-			Section:    "Returns",
-			Content:    "Customers can request returns within 30 days of delivery. Refunds are processed in 3 to 5 business days after returned items are inspected at the warehouse.",
+			Title:      "Tracking Your Medication Order",
+			Collection: "Online Pharmacy Support",
+			Section:    "Orders & Delivery",
+			Content:    "Tracking links are sent by email and SMS once courier pickup is confirmed. Courier movement can take up to 24 hours to appear after label creation.",
 			Status:     "published",
 		},
 		{
-			Title:      "Free Shipping Eligibility",
-			Collection: "Orders & Shipping",
-			Section:    "Shipping",
-			Content:    "Free shipping applies when cart value meets the minimum threshold shown at checkout. Promotional free-shipping codes cannot be combined with some discount campaigns.",
+			Title:      "Cold-Chain Medication Delivery Requirements",
+			Collection: "Online Pharmacy Support",
+			Section:    "Orders & Delivery",
+			Content:    "Temperature-sensitive medications are packed with validated cold-chain materials and time-limited delivery windows. Please collect and refrigerate promptly based on package instructions.",
+			Status:     "published",
+		},
+		{
+			Title:      "Changing Delivery Address for Medication Orders",
+			Collection: "Online Pharmacy Support",
+			Section:    "Orders & Delivery",
+			Content:    "Address changes are allowed only before a pharmacy order reaches packed status. For controlled medications, delivery address changes may be restricted by regulation.",
+			Status:     "published",
+		},
+		{
+			Title:      "Damaged, Incorrect, or Missing Medication Orders",
+			Collection: "Online Pharmacy Support",
+			Section:    "Orders & Delivery",
+			Content:    "Report packaging damage, wrong items, or missing items within 24 hours with clear photos of labels and contents. We review eligibility and arrange replacement or refund when applicable.",
+			Status:     "published",
+		},
+		{
+			Title:      "Accepted Payment Methods and HSA/FSA Cards",
+			Collection: "Online Pharmacy Support",
+			Section:    "Billing & Insurance",
+			Content:    "We accept major credit and debit cards, selected wallets, and eligible HSA/FSA cards for qualifying items. Payment authorization occurs at order placement and capture occurs at dispatch.",
+			Status:     "published",
+		},
+		{
+			Title:      "Insurance Claims and Copay Questions",
+			Collection: "Online Pharmacy Support",
+			Section:    "Billing & Insurance",
+			Content:    "Insurance pricing depends on plan formulary, eligibility, and pharmacy benefit rules. Copay amounts are finalized after claim adjudication and may differ from pre-checkout estimates.",
+			Status:     "published",
+		},
+		{
+			Title:      "Account Access, Password Reset, and Privacy Requests",
+			Collection: "Online Pharmacy Support",
+			Section:    "Account & Privacy",
+			Content:    "Use Forgot Password on the login page to restore access, then verify recent prescriptions in your account timeline. For privacy requests, contact support from your verified email so we can confirm identity before sharing account data.",
 			Status:     "published",
 		},
 	}
 
 	for _, article := range articles {
+		var embeddingParam *string
+		if aiSvc != nil {
+			embedding, err := aiSvc.GenerateEmbedding(ctx, article.Title+"\n\n"+article.Content)
+			if err != nil {
+				fmt.Printf("Warning: failed to create embedding for article %s: %v\n", article.Title, err)
+			} else {
+				embeddingParam = seedVectorLiteral(embedding)
+			}
+		}
+
 		if _, err := db.Pool.Exec(
 			ctx,
-			`INSERT INTO articles (title, collection_name, section_name, content, status, view_count)
-			 VALUES ($1, $2, $3, $4, $5, 0)`,
+			`INSERT INTO articles (title, collection_name, section_name, content, status, view_count, embedding)
+			 VALUES ($1, $2, $3, $4, $5, 0, $6::vector)`,
 			article.Title,
 			article.Collection,
 			article.Section,
 			article.Content,
 			article.Status,
+			embeddingParam,
 		); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func seedVectorLiteral(values []float32) *string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	parts := make([]string, len(values))
+	for i, value := range values {
+		parts[i] = strconv.FormatFloat(float64(value), 'f', -1, 32)
+	}
+
+	literal := "[" + strings.Join(parts, ",") + "]"
+	return &literal
 }

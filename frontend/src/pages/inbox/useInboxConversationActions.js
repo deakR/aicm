@@ -10,6 +10,7 @@ export default function useInboxConversationActions({
 }) {
   const [selectedConversations, setSelectedConversations] = useState(new Set());
   const [isBulkActionLoading, setIsBulkActionLoading] = useState(false);
+  const [isConversationUpdating, setIsConversationUpdating] = useState(false);
   const [bulkAssignAgentId, setBulkAssignAgentId] = useState("");
 
   const clearSelection = useCallback(() => {
@@ -18,7 +19,9 @@ export default function useInboxConversationActions({
 
   const handleUpdateConversation = useCallback(
     async (payload) => {
-      if (!activeChat) return;
+      if (!activeChat || isConversationUpdating) return;
+
+      setIsConversationUpdating(true);
 
       try {
         const res = await fetch(
@@ -44,9 +47,18 @@ export default function useInboxConversationActions({
         }
       } catch (err) {
         console.error("Failed to update conversation", err);
+      } finally {
+        setIsConversationUpdating(false);
       }
     },
-    [activeChat, apiUrl, setActiveChat, setConversations, token],
+    [
+      activeChat,
+      apiUrl,
+      isConversationUpdating,
+      setActiveChat,
+      setConversations,
+      token,
+    ],
   );
 
   const handleAddTag = useCallback(
@@ -132,6 +144,7 @@ export default function useInboxConversationActions({
   return {
     selectedConversations,
     isBulkActionLoading,
+    isConversationUpdating,
     bulkAssignAgentId,
     setBulkAssignAgentId,
     clearSelection,

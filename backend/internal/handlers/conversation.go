@@ -138,13 +138,48 @@ func shouldTriggerAI(conversationID string) bool {
 	return true
 }
 
+func (h *ConversationHandler) shouldAutoReplyWithAI(ctx context.Context, conversationID string) bool {
+	var hasAssignee bool
+	if err := h.DB.Pool.QueryRow(
+		ctx,
+		`SELECT EXISTS(SELECT 1 FROM conversations WHERE id = $1 AND assignee_id IS NOT NULL)`,
+		conversationID,
+	).Scan(&hasAssignee); err != nil {
+		log.Printf("failed checking AI assignee gate for conversation %s: %v", conversationID, err)
+		return true
+	}
+	if hasAssignee {
+		return false
+	}
+
+	var hasHumanReply bool
+	if err := h.DB.Pool.QueryRow(
+		ctx,
+		`SELECT EXISTS(
+			SELECT 1
+			FROM messages m
+			JOIN users u ON u.id = m.sender_id
+			WHERE m.conversation_id = $1
+			  AND m.is_internal = false
+			  AND m.is_ai_generated = false
+			  AND u.role IN ('agent', 'admin')
+		)`,
+		conversationID,
+	).Scan(&hasHumanReply); err != nil {
+		log.Printf("failed checking AI human-reply gate for conversation %s: %v", conversationID, err)
+		return true
+	}
+
+	return !hasHumanReply
+}
+
 func aiConfidenceThreshold() float64 {
 	if raw := strings.TrimSpace(os.Getenv("AI_CONFIDENCE_THRESHOLD")); raw != "" {
 		if v, err := strconv.ParseFloat(raw, 64); err == nil && v > 0 && v <= 1 {
 			return v
 		}
 	}
-	return 0.5
+	return 0.65
 }
 
 func classifyConfidence(score float64) string {
@@ -366,6 +401,8 @@ func (h *ConversationHandler) ListConversations(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	limit, offset := parsePagination(r, 50, 200)
+
 	baseQuery := `
 		SELECT
 			c.id, c.customer_id, c.assignee_id, c.source, c.subject, c.status, c.created_at, c.updated_at,
@@ -418,7 +455,8 @@ func (h *ConversationHandler) ListConversations(w http.ResponseWriter, r *http.R
 	if len(whereClauses) > 0 {
 		query += " WHERE " + strings.Join(whereClauses, " AND ")
 	}
-	query += " ORDER BY c.updated_at DESC"
+	query += fmt.Sprintf(" ORDER BY c.updated_at DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	args = append(args, limit, offset)
 
 	rows, err := h.DB.Pool.Query(context.Background(), query, args...)
 	if err != nil {
@@ -455,6 +493,10 @@ func (h *ConversationHandler) ListConversations(w http.ResponseWriter, r *http.R
 		}
 		conversations = append(conversations, c)
 	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "Failed to stream conversations", http.StatusInternalServerError)
+		return
+	}
 
 	if conversations == nil {
 		conversations = []models.Conversation{}
@@ -482,6 +524,8 @@ func (h *ConversationHandler) GetMessages(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	limit, offset := parsePagination(r, 200, 500)
+
 	query := `
 		SELECT
 			m.id, m.conversation_id, m.sender_id, u.role, m.content, m.attachment_url, m.attachment_name, m.attachment_type, m.is_ai_generated, m.is_internal, m.created_at,
@@ -490,9 +534,10 @@ func (h *ConversationHandler) GetMessages(w http.ResponseWriter, r *http.Request
 		JOIN users u ON m.sender_id = u.id
 		WHERE m.conversation_id = $1
 		ORDER BY m.created_at ASC
+		LIMIT $2 OFFSET $3
 	`
 
-	rows, err := h.DB.Pool.Query(context.Background(), query, conversationID)
+	rows, err := h.DB.Pool.Query(context.Background(), query, conversationID, limit, offset)
 	if err != nil {
 		log.Printf("ERROR: Failed to fetch messages for conversation %s: %v", conversationID, err)
 		http.Error(w, "Failed to fetch messages", http.StatusInternalServerError)
@@ -510,6 +555,11 @@ func (h *ConversationHandler) GetMessages(w http.ResponseWriter, r *http.Request
 			return
 		}
 		messages = append(messages, m)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("ERROR: Failed while streaming messages for conversation %s: %v", conversationID, err)
+		http.Error(w, "Failed to stream messages", http.StatusInternalServerError)
+		return
 	}
 
 	if messages == nil {
@@ -611,7 +661,7 @@ func (h *ConversationHandler) SendMessage(w http.ResponseWriter, r *http.Request
 		go workflowEngine.EvaluateMessage(context.Background(), conversationID, payload.Content)
 	}
 
-	if role == "customer" && h.AI != nil && shouldTriggerAI(conversationID) {
+	if role == "customer" && h.AI != nil && shouldTriggerAI(conversationID) && h.shouldAutoReplyWithAI(context.Background(), conversationID) {
 		go h.triggerAIAgent(conversationID, payload.Content)
 	}
 
@@ -740,9 +790,8 @@ func (h *ConversationHandler) triggerAIAgent(conversationID string, customerMess
 	customerRequestedHuman := customerRequestedHumanSupport(customerMessage)
 
 	systemInstruction := fmt.Sprintf(
-		"You are %s, a helpful customer support AI agent with a %s tone. Reply in 1 or 2 short sentences. Give the customer a direct answer first, then one practical next step only if needed. Keep the tone %s. Do not include greetings, salutations, self-introductions, or phrases like 'How can I help you today?'.",
+		"You are %s, a helpful customer support AI agent with a %s tone. Reply in 1 or 2 short sentences. Give the customer a direct answer from the article provided. Do not make commitments on behalf of the support team (e.g. do not say 'we will', 'we'll place', 'you will receive'). State facts from the article only. Do not include greetings, salutations, self-introductions, or phrases like 'How can I help you today?'.",
 		settings.Name,
-		settings.Tone,
 		settings.Tone,
 	)
 
@@ -763,16 +812,22 @@ func (h *ConversationHandler) triggerAIAgent(conversationID string, customerMess
 		} else {
 			aiReply = strings.TrimSpace(reply)
 		}
+
+		// Append source reference as required by PRD §5.1
+		if strings.TrimSpace(match.Title) != "" {
+			aiReply = aiReply + "\n\n_Based on: " + strings.TrimSpace(match.Title) + "_"
+		}
+
 		aiOutcome = "answered"
 	} else {
 		outOfScopeInstruction := fmt.Sprintf(
-			"You are %s, a customer support AI with a %s tone. The customer's message is outside this platform's knowledge base, which covers billing, refunds, shipping, account management, and password help. Acknowledge that you don't have specific information about their issue. Apologize briefly, tell them a human support agent will follow up, and ask them to share any relevant details that might help. Reply in 2 sentences maximum. Do not include greetings, salutations, self-introductions, or phrases like 'How can I help you today?'.",
+			"You are %s, a customer support AI with a %s tone. Your knowledge base only covers: refund and return policy, billing and payment issues, shipping and delivery timelines, changing a delivery address, password reset, and account cancellation. The customer's message is outside those topics. Reply in exactly 1 sentence. Start with brief empathy (e.g. 'Sorry about that' or 'I understand'). Say you don't have information to help with this specific issue. End by telling them a support agent can look into it. Never use the words 'knowledge base', 'unable to assist', 'not able to assist', or 'falls outside'. Do not include any greeting or self-introduction.",
 			settings.Name,
 			settings.Tone,
 		)
 		reply, err := h.AI.GenerateSupportReply(ctx, outOfScopeInstruction, customerMessage)
 		if err != nil || strings.TrimSpace(reply) == "" {
-			aiReply = "I don't have verified information about this in our help center. A human support agent will follow up with you shortly."
+			aiReply = "Sorry about that — I don't have information on this specific issue, but a support agent can look into it for you."
 		} else {
 			aiReply = strings.TrimSpace(reply)
 		}
@@ -784,8 +839,20 @@ func (h *ConversationHandler) triggerAIAgent(conversationID string, customerMess
 		if shouldAnswerFromKnowledge && strings.TrimSpace(match.Content) != "" {
 			aiReply = summarizeArticleForCustomer(match.Content)
 		} else {
-			aiReply = "I don't have verified information about this in our help center. A human support agent will follow up with you shortly."
+			aiReply = "Sorry about that — I don't have information on this specific issue, but a support agent can look into it for you."
 		}
+	}
+
+	// Prepend greeting on first AI reply in conversation, per PRD §5.1
+	var hasPreviousAIReply bool
+	_ = h.DB.Pool.QueryRow(
+		ctx,
+		`SELECT EXISTS(SELECT 1 FROM messages WHERE conversation_id = $1 AND is_ai_generated = true)`,
+		conversationID,
+	).Scan(&hasPreviousAIReply)
+
+	if !hasPreviousAIReply && aiOutcome == "answered" && strings.TrimSpace(settings.Greeting) != "" {
+		aiReply = strings.TrimSpace(settings.Greeting) + " " + aiReply
 	}
 
 	// ---------------------------------------------------------
@@ -842,6 +909,61 @@ func (h *ConversationHandler) lookupBestArticle(ctx context.Context, customerMes
 }
 
 func (h *ConversationHandler) lookupArticleMatches(ctx context.Context, customerMessage string, limit int) []articleMatch {
+	if h.AI != nil {
+		embedding, err := h.AI.GenerateEmbedding(ctx, customerMessage)
+		if err == nil && len(embedding) > 0 {
+			embeddingParam := vectorLiteral(embedding)
+			if embeddingParam != nil {
+				// Use semantic vector search.
+				query := `
+					SELECT id, title, content, 1 - (embedding <=> $1::vector) AS similarity
+					FROM articles
+					WHERE status = 'published' AND embedding IS NOT NULL
+					ORDER BY embedding <=> $1::vector
+					LIMIT $2
+				`
+				limitVal := limit
+				if limitVal <= 0 {
+					limitVal = 5
+				}
+
+				rows, err := h.DB.Pool.Query(ctx, query, *embeddingParam, limitVal)
+				if err == nil {
+					defer rows.Close()
+					matches := []articleMatch{}
+					for rows.Next() {
+						var id, title, content string
+						var similarity float64
+						if scanErr := rows.Scan(&id, &title, &content, &similarity); scanErr != nil {
+							continue
+						}
+
+						confidenceScore := clampScore(similarity)
+						if confidenceScore <= 0 {
+							continue
+						}
+
+						matches = append(matches, articleMatch{
+							ID:              id,
+							Title:           title,
+							Content:         content,
+							SourceMode:      "semantic",
+							Score:           int(confidenceScore * 100),
+							ConfidenceScore: confidenceScore,
+							ConfidenceLabel: classifyConfidence(confidenceScore),
+						})
+					}
+					if err := rows.Err(); err != nil {
+						log.Printf("semantic article match stream failed: %v", err)
+					} else if len(matches) > 0 {
+						return matches
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback to keyword search if embedding generation fails or no vectors found
 	rows, err := h.DB.Pool.Query(ctx, `SELECT id, title, content FROM articles WHERE status = 'published'`)
 	if err == nil {
 		defer rows.Close()
@@ -860,6 +982,10 @@ func (h *ConversationHandler) lookupArticleMatches(ctx context.Context, customer
 			matches = append(matches, match)
 		}
 
+		if err := rows.Err(); err != nil {
+			log.Printf("keyword article match stream failed: %v", err)
+			return []articleMatch{}
+		}
 		if len(matches) == 0 {
 			return []articleMatch{}
 		}
@@ -901,9 +1027,14 @@ func containsEscalationLanguage(text string) bool {
 	phrases := []string{
 		"human agent",
 		"support agent",
+		"live agent",
+		"live chat",
+		"live support",
 		"connect you",
 		"transfer you",
 		"escalate",
+		"connecting you",
+		"transferring you",
 	}
 	for _, phrase := range phrases {
 		if strings.Contains(lowered, phrase) {
@@ -941,6 +1072,9 @@ func customerRequestedHumanSupport(text string) bool {
 		"human",
 		"real person",
 		"support agent",
+		"support manager",
+		"talk to a manager",
+		"speak to a manager",
 		"live agent",
 		"talk to someone",
 		"speak to someone",
@@ -1108,9 +1242,6 @@ func normalizeSearchToken(part string) string {
 		part = strings.TrimSuffix(part, "ed")
 	case strings.HasSuffix(part, "al") && len(part) > 5:
 		part = strings.TrimSuffix(part, "al")
-	}
-	if strings.HasSuffix(part, "e") && len(part) > 4 {
-		part = strings.TrimSuffix(part, "e")
 	}
 	if strings.HasSuffix(part, "s") && len(part) > 4 {
 		part = strings.TrimSuffix(part, "s")
@@ -1418,7 +1549,7 @@ func (h *ConversationHandler) SimulateEmail(w http.ResponseWriter, r *http.Reque
 	go workflowEngine.EvaluateNewConversation(context.Background(), conversationID)
 	go workflowEngine.EvaluateMessage(context.Background(), conversationID, payload.Content)
 
-	if h.AI != nil && shouldTriggerAI(conversationID) {
+	if h.AI != nil && shouldTriggerAI(conversationID) && h.shouldAutoReplyWithAI(context.Background(), conversationID) {
 		go h.triggerAIAgent(conversationID, payload.Content)
 	}
 

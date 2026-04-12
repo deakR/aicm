@@ -10,6 +10,7 @@ import (
 	"deakr/aicm/internal/ai"
 	"deakr/aicm/internal/database"
 	"deakr/aicm/internal/models"
+
 	"github.com/go-chi/chi/v5"
 )
 
@@ -46,10 +47,19 @@ func (h *KnowledgeHandler) CreateArticle(w http.ResponseWriter, r *http.Request)
 	payload.Section = normalizeArticleTaxonomy(payload.Section, "General")
 
 	ctx := context.Background()
+	var embeddingParam *string
+	if h.AI != nil {
+		embedding, err := h.AI.GenerateEmbedding(ctx, payload.Title+"\n\n"+payload.Content)
+		if err != nil {
+			fmt.Printf("Warning: failed to generate article embedding: %v\n", err)
+		} else {
+			embeddingParam = vectorLiteral(embedding)
+		}
+	}
 
 	query := `
-		INSERT INTO articles (title, collection_name, section_name, content, status)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO articles (title, collection_name, section_name, content, status, embedding)
+		VALUES ($1, $2, $3, $4, $5, $6::vector)
 		RETURNING id, collection_name, section_name, created_at
 	`
 
@@ -68,6 +78,7 @@ func (h *KnowledgeHandler) CreateArticle(w http.ResponseWriter, r *http.Request)
 		payload.Section,
 		payload.Content,
 		payload.Status,
+		embeddingParam,
 	).Scan(&article.ID, &article.Collection, &article.Section, &article.CreatedAt)
 	if err != nil {
 		fmt.Printf("Database insertion error: %v\n", err)
@@ -98,6 +109,10 @@ func (h *KnowledgeHandler) ListArticles(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		articles = append(articles, a)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "Failed to stream articles", http.StatusInternalServerError)
+		return
 	}
 
 	if articles == nil {
@@ -135,6 +150,10 @@ func (h *KnowledgeHandler) ListPublicArticles(w http.ResponseWriter, r *http.Req
 			return
 		}
 		articles = append(articles, a)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "Failed to stream public articles", http.StatusInternalServerError)
+		return
 	}
 
 	if articles == nil {
@@ -210,6 +229,35 @@ func (h *KnowledgeHandler) UpdateArticle(w http.ResponseWriter, r *http.Request)
 		setClauses = append(setClauses, fmt.Sprintf("status = $%d", argIdx))
 		args = append(args, payload.Status)
 		argIdx++
+	}
+
+	// Update embedding if title or content changes
+	if (payload.Title != "" || payload.Content != "") && h.AI != nil {
+		// Fetch existing to merge
+		var existingTitle, existingContent string
+		queryExisting := `SELECT title, content FROM articles WHERE id = $1`
+		if err := h.DB.Pool.QueryRow(context.Background(), queryExisting, articleID).Scan(&existingTitle, &existingContent); err != nil {
+			http.Error(w, "Article not found", http.StatusNotFound)
+			return
+		}
+
+		newTitle := existingTitle
+		if payload.Title != "" {
+			newTitle = payload.Title
+		}
+		newContent := existingContent
+		if payload.Content != "" {
+			newContent = payload.Content
+		}
+
+		embedding, err := h.AI.GenerateEmbedding(context.Background(), newTitle+"\n\n"+newContent)
+		if err != nil {
+			fmt.Printf("Warning: failed to regenerate article embedding for %s: %v\n", articleID, err)
+		} else if literal := vectorLiteral(embedding); literal != nil {
+			setClauses = append(setClauses, fmt.Sprintf("embedding = $%d::vector", argIdx))
+			args = append(args, *literal)
+			argIdx++
+		}
 	}
 
 	if len(setClauses) == 0 {

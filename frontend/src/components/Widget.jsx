@@ -40,6 +40,8 @@ export default function Widget({ embedded = false }) {
   const [attachment, setAttachment] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const messagesEndRef = useRef(null);
+  const threadViewportRef = useRef(null);
+  const lastRenderedMessageIdRef = useRef("");
   const fileInputRef = useRef(null);
   const socketRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -135,6 +137,7 @@ export default function Widget({ embedded = false }) {
     const conversationId = session?.conversationId || "";
     activeConversationIdRef.current = conversationId;
     fetchRequestSeqRef.current += 1;
+    lastRenderedMessageIdRef.current = "";
     setMessages([]);
     setTypingNotice("");
     setReadState({ customer_last_read_at: "", agent_last_read_at: "" });
@@ -159,7 +162,24 @@ export default function Widget({ embedded = false }) {
   }, [embedded, viewerSession.isAuthenticated, viewerSession.role]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const viewport = threadViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    const latestMessageId = messages.at(-1)?.id || "";
+    if (!latestMessageId) {
+      return;
+    }
+
+    if (latestMessageId === lastRenderedMessageIdRef.current) {
+      return;
+    }
+
+    const behavior = lastRenderedMessageIdRef.current ? "smooth" : "auto";
+    messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+
+    lastRenderedMessageIdRef.current = latestMessageId;
   }, [messages]);
 
   useEffect(() => {
@@ -557,7 +577,7 @@ export default function Widget({ embedded = false }) {
     >
       {isOpen && (
         <div
-          className={`flex flex-col overflow-hidden border transition-all duration-300 ${chromeSurface} ${
+          className={`flex min-h-0 flex-col overflow-hidden border transition-all duration-300 ${chromeSurface} ${
             embedded
               ? "h-full w-full rounded-none border-0 shadow-none"
               : "mb-4 h-[34rem] w-[22rem] origin-bottom-right rounded-2xl shadow-2xl"
@@ -617,7 +637,7 @@ export default function Widget({ embedded = false }) {
           </div>
 
           {activeTab === "help" ? (
-            <div className="flex flex-1 flex-col" style={widgetMutedSurfaceStyle}>
+            <div className="flex min-h-0 flex-1 flex-col" style={widgetMutedSurfaceStyle}>
               <div
                 className="border-b p-3"
                 style={{
@@ -640,7 +660,10 @@ export default function Widget({ embedded = false }) {
                 />
               </div>
               {selectedArticle ? (
-                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                <div
+                  className="min-h-0 flex-1 overflow-y-auto p-4 space-y-3"
+                  style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
+                >
                   <button
                     type="button"
                     onClick={() => setSelectedArticle(null)}
@@ -697,7 +720,10 @@ export default function Widget({ embedded = false }) {
                   </button>
                 </div>
               ) : (
-                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                <div
+                  className="min-h-0 flex-1 overflow-y-auto p-4 space-y-3"
+                  style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
+                >
                   {isArticlesLoading ? (
                     <p className="mt-8 text-center text-sm" style={{ color: "var(--app-text-muted)" }}>
                       Loading articles...
@@ -807,7 +833,16 @@ export default function Widget({ embedded = false }) {
             </div>
           ) : (
             <>
-              <div className="flex-1 space-y-4 overflow-y-auto p-4" style={widgetMutedSurfaceStyle}>
+              <div
+                ref={threadViewportRef}
+                className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4"
+                style={{
+                  ...widgetMutedSurfaceStyle,
+                  WebkitOverflowScrolling: "touch",
+                  touchAction: "pan-y",
+                  overflowAnchor: "none",
+                }}
+              >
                 {messages.length === 0 && (
                   <div className="flex flex-col items-start">
                     <span className="app-message-sender-ai mb-1 inline-flex items-center gap-2 text-[11px] font-medium">

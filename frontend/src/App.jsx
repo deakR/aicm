@@ -12,6 +12,7 @@ import WidgetEmbedPage from './pages/WidgetEmbedPage';
 import CustomerDashboard from './pages/CustomerDashboard';
 import Widget from './components/Widget';
 import AppLayout from './components/AppLayout';
+import AppErrorBoundary from './components/AppErrorBoundary';
 import ThemeToggle from './components/ThemeToggle';
 import { clearStoredToken, getCurrentSession, getDefaultRouteForRole } from './auth';
 import { buildBrandPalette } from './branding';
@@ -126,82 +127,94 @@ function LoginRedirect({ mode = 'workspace', variant = 'login' }) {
   return <Login mode={mode} variant={variant} />;
 }
 
+function withRouteBoundary(element, routeName) {
+  return <AppErrorBoundary routeName={routeName}>{element}</AppErrorBoundary>;
+}
+
 function App() {
   return (
     <BrowserRouter>
       <BrandingProvider>
         <Routes>
-          <Route path="/" element={<HomeRedirect />} />
-          <Route path="/help" element={<HelpCenter />} />
-          <Route path="/embed/widget" element={<WidgetEmbedPage />} />
-          <Route path="/login" element={<LoginRedirect mode="customer" variant="login" />} />
-          <Route path="/register" element={<LoginRedirect mode="customer" variant="register" />} />
-          <Route path="/workspace/login" element={<LoginRedirect mode="workspace" variant="login" />} />
-          <Route path="/customer/login" element={<Navigate to="/login" replace />} />
-          <Route path="/customer/register" element={<Navigate to="/register" replace />} />
+          <Route path="/" element={withRouteBoundary(<HomeRedirect />, 'home')} />
+          <Route path="/help" element={withRouteBoundary(<HelpCenter />, 'help center')} />
+          <Route path="/embed/widget" element={withRouteBoundary(<WidgetEmbedPage />, 'widget embed')} />
+          <Route path="/login" element={withRouteBoundary(<LoginRedirect mode="customer" variant="login" />, 'login')} />
+          <Route path="/register" element={withRouteBoundary(<LoginRedirect mode="customer" variant="register" />, 'register')} />
+          <Route path="/workspace/login" element={withRouteBoundary(<LoginRedirect mode="workspace" variant="login" />, 'workspace login')} />
+          <Route path="/customer/login" element={withRouteBoundary(<Navigate to="/login" replace />, 'customer login')} />
+          <Route path="/customer/register" element={withRouteBoundary(<Navigate to="/register" replace />, 'customer register')} />
           <Route
             path="/customer"
-            element={
+            element={withRouteBoundary(
               <ProtectedRoute allowedRoles={['customer']} loginPath="/login">
                 <CustomerDashboard />
-              </ProtectedRoute>
-            }
+              </ProtectedRoute>,
+              'customer dashboard',
+            )}
           />
           <Route
             path="/dashboard"
-            element={
+            element={withRouteBoundary(
               <ProtectedRoute loginPath="/workspace/login">
                 <AppLayout><Dashboard /></AppLayout>
-              </ProtectedRoute>
-            }
+              </ProtectedRoute>,
+              'dashboard',
+            )}
           />
           <Route
             path="/inbox"
-            element={
+            element={withRouteBoundary(
               <ProtectedRoute loginPath="/workspace/login">
                 <AppLayout><Inbox /></AppLayout>
-              </ProtectedRoute>
-            }
+              </ProtectedRoute>,
+              'inbox',
+            )}
           />
           <Route
             path="/knowledge"
-            element={
+            element={withRouteBoundary(
               <ProtectedRoute loginPath="/workspace/login">
                 <AppLayout><KnowledgeHub /></AppLayout>
-              </ProtectedRoute>
-            }
+              </ProtectedRoute>,
+              'knowledge hub',
+            )}
           />
           <Route
             path="/tickets"
-            element={
+            element={withRouteBoundary(
               <ProtectedRoute loginPath="/workspace/login">
                 <AppLayout><Tickets /></AppLayout>
-              </ProtectedRoute>
-            }
+              </ProtectedRoute>,
+              'tickets',
+            )}
           />
           <Route
             path="/workflows"
-            element={
+            element={withRouteBoundary(
               <ProtectedRoute loginPath="/workspace/login">
                 <AppLayout><Workflows /></AppLayout>
-              </ProtectedRoute>
-            }
+              </ProtectedRoute>,
+              'workflows',
+            )}
           />
           <Route
             path="/settings"
-            element={
+            element={withRouteBoundary(
               <ProtectedRoute allowedRoles={['admin']} loginPath="/workspace/login">
                 <AppLayout><AISettings /></AppLayout>
-              </ProtectedRoute>
-            }
+              </ProtectedRoute>,
+              'settings',
+            )}
           />
           <Route
             path="/users"
-            element={
+            element={withRouteBoundary(
               <ProtectedRoute allowedRoles={['admin']} loginPath="/workspace/login">
                 <AppLayout><Users /></AppLayout>
-              </ProtectedRoute>
-            }
+              </ProtectedRoute>,
+              'users',
+            )}
           />
         </Routes>
       </BrandingProvider>

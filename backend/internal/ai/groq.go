@@ -137,5 +137,60 @@ func (s *Service) GenerateCopilotJSON(ctx context.Context, prompt string) (strin
 	})
 }
 
+type groqEmbeddingRequest struct {
+	Input string `json:"input"`
+	Model string `json:"model"`
+}
+
+type groqEmbeddingResponse struct {
+	Data []struct {
+		Embedding []float32 `json:"embedding"`
+	} `json:"data"`
+}
+
+func (s *Service) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
+	if strings.TrimSpace(s.GroqAPIKey) == "" {
+		return nil, errors.New("groq api key is not configured")
+	}
+
+	reqBody := groqEmbeddingRequest{
+		Input: text,
+		Model: "nomic-embed-text-v1_5",
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.GroqBaseURL+"/embeddings", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+s.GroqAPIKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	httpRes, err := s.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer httpRes.Body.Close()
+
+	if httpRes.StatusCode < 200 || httpRes.StatusCode >= 300 {
+		return nil, fmt.Errorf("groq embeddings failed with status %d", httpRes.StatusCode)
+	}
+
+	var parsed groqEmbeddingResponse
+	if err := json.NewDecoder(httpRes.Body).Decode(&parsed); err != nil {
+		return nil, err
+	}
+
+	if len(parsed.Data) == 0 {
+		return nil, errors.New("groq embeddings returned empty data")
+	}
+
+	return parsed.Data[0].Embedding, nil
+}
+
 // Close exists for interface parity with earlier versions of the service.
 func (s *Service) Close() {}

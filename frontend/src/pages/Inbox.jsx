@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import ResizablePanels from "../components/ResizablePanels";
 import ActiveConversationHeader from "./inbox/ActiveConversationHeader";
@@ -38,6 +38,8 @@ export default function Inbox() {
     ...defaultEmailDraft,
   }));
   const fileInputRef = useRef(null);
+  const threadViewportRef = useRef(null);
+  const lastRenderedMessageIdRef = useRef("");
 
   const navigate = useNavigate();
   const token = localStorage.getItem("token");
@@ -101,6 +103,7 @@ export default function Inbox() {
   const {
     selectedConversations,
     isBulkActionLoading,
+    isConversationUpdating,
     bulkAssignAgentId,
     setBulkAssignAgentId,
     clearSelection,
@@ -170,6 +173,31 @@ export default function Inbox() {
     messages,
   });
 
+  useEffect(() => {
+    lastRenderedMessageIdRef.current = "";
+  }, [activeChat?.id]);
+
+  useEffect(() => {
+    const viewport = threadViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    const latestMessageId = messages.at(-1)?.id || "";
+    if (!latestMessageId) {
+      return;
+    }
+
+    if (latestMessageId === lastRenderedMessageIdRef.current) {
+      return;
+    }
+
+    const behavior = lastRenderedMessageIdRef.current ? "smooth" : "auto";
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+
+    lastRenderedMessageIdRef.current = latestMessageId;
+  }, [messages]);
+
   return (
     <div className="app-main-surface h-full w-full overflow-hidden">
       <ResizablePanels
@@ -235,14 +263,19 @@ export default function Inbox() {
                 }
                 onToggleDetailsRail={() => setShowDetailsRail((prev) => !prev)}
                 onOpenMerge={() => setShowMergeModal(true)}
+                isConversationUpdating={isConversationUpdating}
                 onUpdateConversation={handleUpdateConversation}
                 onAddTag={handleAddTag}
                 onRemoveTag={handleRemoveTag}
               />
 
               <div
+                ref={threadViewportRef}
                 className="flex-1 space-y-4 overflow-y-auto p-6"
-                style={{ background: "color-mix(in srgb, var(--app-card-muted) 96%, transparent)" }}
+                style={{
+                  background: "color-mix(in srgb, var(--app-card-muted) 96%, transparent)",
+                  overflowAnchor: "none",
+                }}
               >
                 {isThreadLoading ? (
                   <div className="app-empty-state px-5 py-4 text-sm">

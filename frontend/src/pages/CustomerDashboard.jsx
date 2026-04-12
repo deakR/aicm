@@ -157,13 +157,19 @@ export default function CustomerDashboard() {
       return;
     }
 
+    if (latestMessageId === lastRenderedMessageIdRef.current) {
+      return;
+    }
+
     const behavior = lastRenderedMessageIdRef.current ? "smooth" : "auto";
     viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+
     lastRenderedMessageIdRef.current = latestMessageId;
   }, [messages]);
 
   useEffect(() => {
-    if (!activeConversation) {
+    const activeConversationID = activeConversation?.id || "";
+    if (!activeConversationID) {
       activeConversationIdRef.current = "";
       setMessages([]);
       setTypingNotice("");
@@ -172,7 +178,7 @@ export default function CustomerDashboard() {
       return undefined;
     }
 
-    activeConversationIdRef.current = activeConversation.id;
+    activeConversationIdRef.current = activeConversationID;
     threadRequestSeqRef.current += 1;
     lastRenderedMessageIdRef.current = "";
     setMessages([]);
@@ -181,7 +187,7 @@ export default function CustomerDashboard() {
 
     let socket = null;
     let reconnectTimer = null;
-    const conversationId = activeConversation.id;
+    const conversationId = activeConversationID;
     const activeCustomerId = overview?.profile?.id;
 
     const fetchMessages = async () => {
@@ -336,7 +342,7 @@ export default function CustomerDashboard() {
       if (socket) socket.close();
     };
   }, [
-    activeConversation,
+    activeConversation?.id,
     overview?.profile?.id,
     sendRealtimeEvent,
     token,
@@ -459,7 +465,7 @@ export default function CustomerDashboard() {
     setError("");
 
     try {
-      const res = await fetch(`${API_URL}/api/protected/customer/chat-session`, {
+      const res = await fetch(`${API_URL}/api/protected/customer/chat-session?force_new=true`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -690,7 +696,7 @@ export default function CustomerDashboard() {
                 <div
                   ref={threadViewportRef}
                   className="min-h-0 flex-1 overflow-y-auto px-6 py-5"
-                  style={{ background: "var(--app-card-muted)" }}
+                  style={{ background: "var(--app-card-muted)", overflowAnchor: "none" }}
                 >
                   {isThreadLoading ? (
                     <div className="text-sm" style={{ color: "var(--app-text-muted)" }}>

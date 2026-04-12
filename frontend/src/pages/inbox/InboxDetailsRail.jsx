@@ -152,8 +152,7 @@ export default function InboxDetailsRail({
               <span className="inline-flex gap-0.5">
                 <span
                   className="h-1.5 w-1.5 animate-bounce rounded-full"
-                  style={{ background: "var(--brand-accent)" }}
-                  style={{ animationDelay: "0ms" }}
+                  style={{ background: "var(--brand-accent)", animationDelay: "0ms" }}
                 ></span>
                 <span
                   className="h-1.5 w-1.5 animate-bounce rounded-full"
