@@ -13,6 +13,7 @@ import CustomerDashboard from './pages/CustomerDashboard';
 import Widget from './components/Widget';
 import AppLayout from './components/AppLayout';
 import AppErrorBoundary from './components/AppErrorBoundary';
+import GlobalBackButton from './components/GlobalBackButton';
 import ThemeToggle from './components/ThemeToggle';
 import { clearStoredToken, getCurrentSession, getDefaultRouteForRole } from './auth';
 import { buildBrandPalette } from './branding';
@@ -77,7 +78,7 @@ function PublicWebsite() {
               to="/help"
               className="app-primary-button w-full sm:w-auto"
             >
-              Browse help articles
+              Browse help center
             </Link>
             <Link
               to="/login"
@@ -135,6 +136,7 @@ function App() {
   return (
     <BrowserRouter>
       <BrandingProvider>
+        <GlobalBackButton />
         <Routes>
           <Route path="/" element={withRouteBoundary(<HomeRedirect />, 'home')} />
           <Route path="/help" element={withRouteBoundary(<HelpCenter />, 'help center')} />

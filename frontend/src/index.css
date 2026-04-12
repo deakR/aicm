@@ -72,6 +72,45 @@ body {
   color: var(--app-text);
 }
 
+.app-global-back-button {
+  position: fixed;
+  z-index: 950;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in srgb, var(--app-border) 88%, transparent);
+  background: color-mix(in srgb, var(--app-card) 88%, transparent);
+  color: var(--app-text);
+  box-shadow: 0 8px 20px rgba(2, 6, 23, 0.12);
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+  backdrop-filter: blur(10px);
+}
+
+.app-global-back-button:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--brand-accent-border) 75%, var(--app-border));
+  background: color-mix(in srgb, var(--app-card-muted) 92%, var(--app-card));
+}
+
+.app-global-back-button:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--brand-accent) 24%, transparent),
+    0 8px 20px rgba(2, 6, 23, 0.18);
+}
+
+[data-theme="dark"] .app-global-back-button {
+  box-shadow: 0 12px 28px rgba(1, 10, 25, 0.44);
+}
+
 .app-main-surface {
   background: linear-gradient(180deg, var(--app-surface), color-mix(in srgb, var(--app-card-muted) 90%, var(--app-surface)));
   color: var(--app-text);
