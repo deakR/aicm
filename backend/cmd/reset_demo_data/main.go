@@ -138,7 +138,7 @@ func main() {
 	fmt.Println("  Workspace (/workspace/login):")
 	fmt.Printf("    admin  -> %s / %s\n", users["admin"].Email, users["admin"].Password)
 	fmt.Printf("    agent  -> %s / %s\n", users["agent"].Email, users["agent"].Password)
-	fmt.Printf("    agent  -> %s / %s\n", users["billing_agent"].Email, users["billing_agent"].Password)
+	fmt.Printf("    billing agent -> %s / %s\n", users["billing_agent"].Email, users["billing_agent"].Password)
 	fmt.Println("  Customer (/login):")
 	fmt.Printf("    customer -> %s / %s\n", users["customer_priya"].Email, users["customer_priya"].Password)
 	fmt.Printf("    customer -> %s / %s\n", users["customer_arjun"].Email, users["customer_arjun"].Password)
