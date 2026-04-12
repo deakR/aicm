@@ -42,6 +42,7 @@ export default function Widget({ embedded = false }) {
   const messagesEndRef = useRef(null);
   const threadViewportRef = useRef(null);
   const lastRenderedMessageIdRef = useRef("");
+  const isThreadPinnedToBottomRef = useRef(true);
   const fileInputRef = useRef(null);
   const socketRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -138,6 +139,7 @@ export default function Widget({ embedded = false }) {
     activeConversationIdRef.current = conversationId;
     fetchRequestSeqRef.current += 1;
     lastRenderedMessageIdRef.current = "";
+    isThreadPinnedToBottomRef.current = true;
     setMessages([]);
     setTypingNotice("");
     setReadState({ customer_last_read_at: "", agent_last_read_at: "" });
@@ -176,8 +178,13 @@ export default function Widget({ embedded = false }) {
       return;
     }
 
-    const behavior = lastRenderedMessageIdRef.current ? "smooth" : "auto";
-    messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+    if (
+      !lastRenderedMessageIdRef.current ||
+      isThreadPinnedToBottomRef.current
+    ) {
+      const behavior = lastRenderedMessageIdRef.current ? "smooth" : "auto";
+      messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+    }
 
     lastRenderedMessageIdRef.current = latestMessageId;
   }, [messages]);
@@ -835,6 +842,15 @@ export default function Widget({ embedded = false }) {
             <>
               <div
                 ref={threadViewportRef}
+                onScroll={() => {
+                  const viewport = threadViewportRef.current;
+                  if (!viewport) {
+                    return;
+                  }
+                  const distanceFromBottom =
+                    viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+                  isThreadPinnedToBottomRef.current = distanceFromBottom < 100;
+                }}
                 className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4"
                 style={{
                   ...widgetMutedSurfaceStyle,
@@ -885,11 +901,11 @@ export default function Widget({ embedded = false }) {
                                 ? "rounded-tl-none app-message-bubble-ai"
                                 : "rounded-tl-none app-message-bubble-support"
                           }`}
-                          style={
-                            isCustomer
-                              ? { backgroundColor: palette.accent }
-                              : undefined
-                          }
+                          style={{
+                            ...(isCustomer ? { backgroundColor: palette.accent } : {}),
+                            overflowWrap: "break-word",
+                            wordBreak: "break-word",
+                          }}
                         >
                           {msg.content}
                           {msg.attachment_url && (

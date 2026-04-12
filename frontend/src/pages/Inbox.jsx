@@ -40,6 +40,7 @@ export default function Inbox() {
   const fileInputRef = useRef(null);
   const threadViewportRef = useRef(null);
   const lastRenderedMessageIdRef = useRef("");
+  const isThreadPinnedToBottomRef = useRef(true);
 
   const navigate = useNavigate();
   const token = localStorage.getItem("token");
@@ -175,6 +176,7 @@ export default function Inbox() {
 
   useEffect(() => {
     lastRenderedMessageIdRef.current = "";
+    isThreadPinnedToBottomRef.current = true;
   }, [activeChat?.id]);
 
   useEffect(() => {
@@ -192,8 +194,13 @@ export default function Inbox() {
       return;
     }
 
-    const behavior = lastRenderedMessageIdRef.current ? "smooth" : "auto";
-    viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+    if (
+      !lastRenderedMessageIdRef.current ||
+      isThreadPinnedToBottomRef.current
+    ) {
+      const behavior = lastRenderedMessageIdRef.current ? "smooth" : "auto";
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+    }
 
     lastRenderedMessageIdRef.current = latestMessageId;
   }, [messages]);
@@ -271,6 +278,15 @@ export default function Inbox() {
 
               <div
                 ref={threadViewportRef}
+                onScroll={() => {
+                  const viewport = threadViewportRef.current;
+                  if (!viewport) {
+                    return;
+                  }
+                  const distanceFromBottom =
+                    viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+                  isThreadPinnedToBottomRef.current = distanceFromBottom < 100;
+                }}
                 className="flex-1 space-y-4 overflow-y-auto p-6"
                 style={{
                   background: "color-mix(in srgb, var(--app-card-muted) 96%, transparent)",

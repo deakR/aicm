@@ -57,6 +57,7 @@ export default function CustomerDashboard() {
   const activeConversationIdRef = useRef("");
   const threadRequestSeqRef = useRef(0);
   const lastRenderedMessageIdRef = useRef("");
+  const isThreadPinnedToBottomRef = useRef(true);
 
   const sendRealtimeEvent = useCallback((payload) => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -161,8 +162,13 @@ export default function CustomerDashboard() {
       return;
     }
 
-    const behavior = lastRenderedMessageIdRef.current ? "smooth" : "auto";
-    viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+    if (
+      !lastRenderedMessageIdRef.current ||
+      isThreadPinnedToBottomRef.current
+    ) {
+      const behavior = lastRenderedMessageIdRef.current ? "smooth" : "auto";
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+    }
 
     lastRenderedMessageIdRef.current = latestMessageId;
   }, [messages]);
@@ -175,12 +181,14 @@ export default function CustomerDashboard() {
       setTypingNotice("");
       setReadState({ customer_last_read_at: "", agent_last_read_at: "" });
       lastRenderedMessageIdRef.current = "";
+      isThreadPinnedToBottomRef.current = true;
       return undefined;
     }
 
     activeConversationIdRef.current = activeConversationID;
     threadRequestSeqRef.current += 1;
     lastRenderedMessageIdRef.current = "";
+    isThreadPinnedToBottomRef.current = true;
     setMessages([]);
     setTypingNotice("");
     setReadState({ customer_last_read_at: "", agent_last_read_at: "" });
@@ -695,6 +703,15 @@ export default function CustomerDashboard() {
 
                 <div
                   ref={threadViewportRef}
+                  onScroll={() => {
+                    const viewport = threadViewportRef.current;
+                    if (!viewport) {
+                      return;
+                    }
+                    const distanceFromBottom =
+                      viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+                    isThreadPinnedToBottomRef.current = distanceFromBottom < 100;
+                  }}
                   className="min-h-0 flex-1 overflow-y-auto px-6 py-5"
                   style={{ background: "var(--app-card-muted)", overflowAnchor: "none" }}
                 >
@@ -735,7 +752,7 @@ export default function CustomerDashboard() {
                               {getSenderLabel(message, overview.profile.id)}
                             </span>
                             <div
-                              className={`max-w-[78%] rounded-2xl px-4 py-3 text-sm ${
+                              className={`max-w-[78%] break-words rounded-2xl px-4 py-3 text-sm ${
                                 isCustomer
                                   ? "rounded-tr-none"
                                   : isAI
@@ -744,8 +761,13 @@ export default function CustomerDashboard() {
                               }`}
                               style={
                                 isCustomer
-                                  ? { backgroundColor: palette.accent, color: "#ffffff" }
-                                  : undefined
+                                  ? {
+                                      backgroundColor: palette.accent,
+                                      color: "#ffffff",
+                                      overflowWrap: "break-word",
+                                      wordBreak: "break-word",
+                                    }
+                                  : { overflowWrap: "break-word", wordBreak: "break-word" }
                               }
                             >
                               {message.content && (
